@@ -712,9 +712,9 @@ Los contrastes agronómicos planificados y las probabilidades de estar dentro de
 
 La ausencia actual de figuras es una debilidad importante. No hace falta convertir la tesis en un atlas; cuatro figuras bien elegidas serían suficientes para cambiar radicalmente su legibilidad.
 
-### Figura 1. Cronograma experimental y N acumulado
+### Figura 1. Cronograma experimental y N aplicado acumulado
 
-El análisis genera `figura_01_cronograma_y_n_acumulado` en PNG y PDF. Presenta M0–M5, aplicaciones experimentales y comunes, muestreos y N acumulado, y resalta que M5 tenía 100 kg N ha⁻¹ experimentales el 16 de septiembre. Es científicamente esencial porque revela de inmediato qué significa cada “calendario”. Antes de insertarla en la tesis solo debe verificarse que todas las fechas coincidan con la bitácora autoritativa.
+El análisis genera `figura_01_cronograma_y_n_acumulado` en PNG y PDF. Presenta M0–M5 en franjas alineadas, integra las aplicaciones experimentales con las tres aplicaciones comunes —abril ≈60, 1.º de julio ≈52 y agosto ≈52 kg N ha⁻¹— y distingue mediante rampas grises punteadas los dos intervalos cuya fecha exacta no está consignada. También muestra los muestreos y resalta que, al 16 de septiembre, M1–M4 habían recibido ≈364 kg N ha⁻¹ totales y M5 ≈264 kg N ha⁻¹. Es científicamente esencial porque revela de inmediato qué significa cada “calendario”. Antes de insertarla en la tesis solo debe verificarse que todas las fechas coincidan con la bitácora autoritativa.
 
 ### Figura 2. Rendimiento: dos preguntas y dos escalas
 

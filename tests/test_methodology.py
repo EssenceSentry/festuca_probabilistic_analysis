@@ -17,6 +17,11 @@ from festuca_analysis.annex import (
     prior_predictive_summary,
     prior_specification_table,
 )
+from festuca_analysis.longitudinal import (
+    COMMON_N_APPLICATIONS,
+    COMMON_N_TOTAL_KG_HA,
+    EXPERIMENTAL_N_TOTAL_KG_HA,
+)
 from festuca_analysis.plotting import (
     DATA_LINEWIDTH,
     ERRORBAR_CAPSIZE,
@@ -51,6 +56,20 @@ class PlotThemeTests(unittest.TestCase):
             self.assertGreater(INTERVAL_LINEWIDTH, REFERENCE_LINEWIDTH)
             self.assertFalse(mpl_api.rcParams["axes.spines.top"])
             self.assertFalse(mpl_api.rcParams["axes.spines.right"])
+
+
+class NitrogenScheduleTests(unittest.TestCase):
+    def test_common_schedule_includes_april_july_and_august_applications(self) -> None:
+        self.assertEqual(
+            COMMON_N_APPLICATIONS,
+            (
+                ("2025-04-01", "2025-05-01", 60.0),
+                ("2025-07-01", "2025-07-01", 52.0),
+                ("2025-08-01", "2025-09-01", 52.0),
+            ),
+        )
+        self.assertEqual(COMMON_N_TOTAL_KG_HA, 164.0)
+        self.assertEqual(COMMON_N_TOTAL_KG_HA + EXPERIMENTAL_N_TOTAL_KG_HA, 364.0)
 
 
 class MultiplicityTests(unittest.TestCase):

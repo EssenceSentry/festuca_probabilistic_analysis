@@ -43,6 +43,16 @@ LONGITUDINAL_STEPS = (
     "export_artifacts",
 )
 
+# Start and end coincide when the application date is known. A non-zero interval
+# records the documented month without inventing an exact day.
+COMMON_N_APPLICATIONS = (
+    ("2025-04-01", "2025-05-01", 60.0),
+    ("2025-07-01", "2025-07-01", 52.0),
+    ("2025-08-01", "2025-09-01", 52.0),
+)
+COMMON_N_TOTAL_KG_HA = sum(dose for _start, _end, dose in COMMON_N_APPLICATIONS)
+EXPERIMENTAL_N_TOTAL_KG_HA = 200.0
+
 
 class LongitudinalNotebook:
     """Stateful, section-by-section API for the longitudinal report."""
@@ -233,6 +243,8 @@ def _analysis_steps(
         Markdown,
         display,  # pyright: ignore[reportUnknownVariableType]
     )
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
     from scipy import stats
 
     from festuca_analysis.plotting import (
@@ -241,6 +253,7 @@ def _analysis_steps(
         INTERVAL_LINEWIDTH,
         MARKER_SIZE,
         REFERENCE_LINEWIDTH,
+        SECONDARY_LINEWIDTH,
         add_figure_header,
         add_figure_note,
         apply_plot_theme,
@@ -801,222 +814,360 @@ def _analysis_steps(
 
     def plot_schedule_and_cumulative_n() -> None:
         study_start = pd.Timestamp("2025-04-01")
-        study_end = pd.Timestamp("2025-11-20")
-        grazing_closure = pd.Timestamp("2025-07-01")
+        study_end = pd.Timestamp("2025-11-30")
         common_n_periods = [
-            (
-                pd.Timestamp("2025-04-01"),
-                pd.Timestamp("2025-05-01"),
-                "≈60 kg N ha⁻¹ comunes\n(fecha de abril no precisada)",
-            ),
-            (
-                pd.Timestamp("2025-08-01"),
-                pd.Timestamp("2025-09-01"),
-                "≈52 kg N ha⁻¹ comunes\n(fecha de agosto no precisada)",
-            ),
+            (pd.Timestamp(start), pd.Timestamp(end), dose)
+            for start, end, dose in COMMON_N_APPLICATIONS
         ]
-
-        fig, axes = mpl.subplots(
-            2,
-            1,
-            figsize=(12.2, 8.3),
-            sharex=True,
-            gridspec_kw={"height_ratios": [1.25, 1.0]},
-        )
-        calendar_ax, cumulative_ax = np.asarray(axes).ravel()
-
-        # Panel A: calendario completo.
-        treatment_positions = {
-            treatment: index for index, treatment in enumerate(TREATMENTS)
+        common_n_uncertain_periods = [
+            (start, end, dose, f"≈{dose:.0f} común")
+            for start, end, dose in common_n_periods
+            if start != end
+        ]
+        exact_common_events = {
+            start: dose for start, end, dose in common_n_periods if start == end
         }
-        for start, end, _label in common_n_periods:
-            calendar_ax.axvspan(
-                start,
-                end,
-                color=PLOT_PALETTE[5],
-                alpha=0.09,
-                linewidth=0,
+        if set(exact_common_events) != {pd.Timestamp("2025-07-01")}:
+            raise AssertionError(
+                "Se esperaba una aplicación común fechada el 1.º de julio."
+            )
+        grazing_closure = next(iter(exact_common_events))
+        exact_common_n = exact_common_events[grazing_closure]
+        common_n_total = COMMON_N_TOTAL_KG_HA
+        fertilized_n_total = common_n_total + EXPERIMENTAL_N_TOTAL_KG_HA
+        row_height = 0.66
+        dose_scale = row_height / fertilized_n_total
+        common_color = "0.58"
+        uncertainty_color = "0.62"
+        separator_color = "0.82"
+        row_positions = {
+            treatment: float(len(TREATMENTS) - index - 1)
+            for index, treatment in enumerate(TREATMENTS)
+        }
+
+        def common_ramp_n(moment: pd.Timestamp) -> float:
+            accumulated = 0.0
+            for start, end, dose, _label in common_n_uncertain_periods:
+                if moment >= end:
+                    accumulated += dose
+                elif moment > start:
+                    elapsed = (moment - start) / (end - start)
+                    accumulated += dose * float(elapsed)
+            return accumulated
+
+        def treatment_path(
+            application_dates: list[pd.Timestamp],
+        ) -> tuple[list[pd.Timestamp], np.ndarray, np.ndarray]:
+            exact_events: dict[pd.Timestamp, tuple[float, float]] = {
+                date: (dose, 0.0) for date, dose in exact_common_events.items()
+            }
+            for application_date in application_dates:
+                common_delta, experimental_delta = exact_events.get(
+                    application_date, (0.0, 0.0)
+                )
+                exact_events[application_date] = (
+                    common_delta,
+                    experimental_delta + 100.0,
+                )
+
+            knots = {
+                study_start,
+                study_end,
+                *[start for start, _end, _dose, _label in common_n_uncertain_periods],
+                *[end for _start, end, _dose, _label in common_n_uncertain_periods],
+                *exact_events,
+            }
+            ordered_knots = sorted(knots)
+            x_path: list[pd.Timestamp] = []
+            common_path: list[float] = []
+            total_path: list[float] = []
+            exact_common_accumulated = 0.0
+            experimental_accumulated = 0.0
+
+            for moment in ordered_knots:
+                common_before = common_ramp_n(moment) + exact_common_accumulated
+                x_path.append(moment)
+                common_path.append(common_before)
+                total_path.append(common_before + experimental_accumulated)
+
+                common_delta, experimental_delta = exact_events.get(moment, (0.0, 0.0))
+                if common_delta or experimental_delta:
+                    exact_common_accumulated += common_delta
+                    experimental_accumulated += experimental_delta
+                    x_path.append(moment)
+                    common_path.append(common_ramp_n(moment) + exact_common_accumulated)
+                    total_path.append(
+                        common_ramp_n(moment)
+                        + exact_common_accumulated
+                        + experimental_accumulated
+                    )
+
+            return x_path, np.asarray(common_path), np.asarray(total_path)
+
+        fig, ax = mpl.subplots(figsize=(13.6, 8.2))
+
+        for start, end, _dose, _label in common_n_uncertain_periods:
+            ax.axvspan(start, end, color="0.88", alpha=0.34, linewidth=0, zorder=0)
+
+        for boundary in [0.83, 1.83, 2.83, 3.83, 4.83]:
+            ax.axhline(
+                boundary,
+                color=separator_color,
+                linestyle=(0, (1.2, 4.0)),
+                linewidth=REFERENCE_LINEWIDTH,
+                zorder=0,
             )
 
-        calendar_ax.axvline(
+        for sample_date in DATES:
+            ax.axvline(
+                sample_date,
+                color=uncertainty_color,
+                linestyle=(0, (2.0, 3.0)),
+                linewidth=REFERENCE_LINEWIDTH,
+                alpha=0.85,
+                zorder=1,
+            )
+
+        ax.axvline(
             grazing_closure,
-            color=PLOT_PALETTE[3],
-            linestyle="-.",
+            color="0.48",
             linewidth=REFERENCE_LINEWIDTH,
             alpha=0.9,
+            zorder=1,
         )
-        calendar_ax.annotate(
-            "1 jul: cierre del pastoreo\ny ≈52 kg N ha⁻¹ comunes",
-            xy=(grazing_closure, 0.35),
-            xytext=(7, -2),
-            textcoords="offset points",
-            ha="left",
+
+        application_labels: dict[int, str] = {6: "jun", 7: "jul", 8: "ago", 9: "sep"}
+        treatment_colors = dict(zip(FERTILIZED, PLOT_PALETTE[1:6], strict=True))
+
+        for treatment in TREATMENTS:
+            baseline = row_positions[treatment]
+            row = data.schedule.loc[data.schedule["treatment"].eq(treatment)].iloc[0]
+            application_dates = (
+                []
+                if treatment == "M0"
+                else [
+                    pd.Timestamp(row["first_application"]),
+                    pd.Timestamp(row["second_application"]),
+                ]
+            )
+            x_path, common_path, total_path = treatment_path(application_dates)
+            scaled_common = baseline + common_path * dose_scale
+            scaled_total = baseline + total_path * dose_scale
+            line_color = (
+                common_color if treatment == "M0" else treatment_colors[treatment]
+            )
+
+            ax.fill_between(
+                x_path,
+                baseline,
+                scaled_common,
+                color=common_color,
+                alpha=0.29,
+                linewidth=0,
+                zorder=2,
+            )
+            if treatment != "M0":
+                ax.fill_between(
+                    x_path,
+                    scaled_common,
+                    scaled_total,
+                    color=line_color,
+                    alpha=0.11,
+                    linewidth=0,
+                    zorder=2,
+                )
+            ax.plot(
+                x_path,
+                scaled_total,
+                color=line_color,
+                linewidth=DATA_LINEWIDTH,
+                solid_capstyle="round",
+                zorder=4,
+            )
+
+            for index in range(len(x_path) - 1):
+                start = x_path[index]
+                end = x_path[index + 1]
+                if start == end:
+                    continue
+                midpoint = start + (end - start) / 2
+                if any(
+                    uncertain_start <= midpoint <= uncertain_end
+                    for uncertain_start, uncertain_end, _dose, _label in common_n_uncertain_periods
+                ):
+                    ax.plot(
+                        [start, end],
+                        [scaled_total[index], scaled_total[index + 1]],
+                        color=uncertainty_color,
+                        linestyle=(0, (2.1, 2.3)),
+                        linewidth=SECONDARY_LINEWIDTH,
+                        zorder=5,
+                    )
+
+            july_common_before_n = common_ramp_n(grazing_closure)
+            july_common_before = baseline + july_common_before_n * dose_scale
+            july_common_after = (
+                baseline + (july_common_before_n + exact_common_n) * dose_scale
+            )
+            ax.vlines(
+                grazing_closure,
+                july_common_before,
+                july_common_after,
+                color=common_color,
+                linewidth=DATA_LINEWIDTH,
+                zorder=6,
+            )
+
+            label_x = study_start - pd.Timedelta(days=5)
+            row_center = baseline + row_height / 2
+            final_total = common_n_total if treatment == "M0" else fertilized_n_total
+            ax.text(
+                label_x,
+                row_center + 0.13,
+                treatment,
+                ha="right",
+                va="center",
+                fontsize=11,
+                fontweight="bold",
+                clip_on=False,
+            )
+            ax.text(
+                label_x,
+                row_center - 0.08,
+                f"≈{final_total:.0f} kg",
+                ha="right",
+                va="center",
+                fontsize=9.5,
+                clip_on=False,
+            )
+            ax.text(
+                label_x,
+                row_center - 0.26,
+                "solo común" if treatment == "M0" else "164 + 200",
+                ha="right",
+                va="center",
+                fontsize=8.5,
+                color="0.48",
+                clip_on=False,
+            )
+
+            if treatment == "M0":
+                ax.text(
+                    pd.Timestamp("2025-04-03"),
+                    baseline + 0.52,
+                    "sin N experimental adicional",
+                    ha="left",
+                    va="center",
+                    fontsize=9.25,
+                    color="0.40",
+                )
+            else:
+                for application_date in application_dates:
+                    ax.text(
+                        application_date,
+                        baseline - 0.055,
+                        f"{application_date.day} {application_labels[application_date.month]}",
+                        ha="center",
+                        va="top",
+                        fontsize=8.75,
+                        color="0.30",
+                    )
+
+        month_ticks = pd.date_range(
+            "2025-04-01", "2025-11-01", freq="MS"
+        ) + pd.Timedelta(days=14)
+        month_labels = ["abr", "may", "jun", "jul", "ago", "sep", "oct", "nov"]
+        ax.set_xticks(month_ticks, month_labels)
+        ax.set_xlim(study_start, study_end)
+        ax.set_ylim(-0.55, 5.82)
+        ax.set_yticks([])
+        ax.grid(False)
+        ax.spines[["left", "right", "top"]].set_visible(False)
+
+        bottom_event_y = -0.37
+        for start, end, _dose, label in common_n_uncertain_periods:
+            ax.text(
+                start + (end - start) / 2,
+                bottom_event_y,
+                label,
+                ha="center",
+                va="top",
+                fontsize=8.75,
+                color="0.48",
+            )
+        ax.text(
+            grazing_closure,
+            bottom_event_y,
+            "1 jul · +52 común\ncierre del pastoreo",
+            ha="center",
             va="top",
             fontsize=8.75,
-            color=PLOT_PALETTE[3],
+            color="0.38",
         )
-
         for sample_date in DATES:
-            calendar_ax.axvline(
-                sample_date,
-                color=PLOT_PALETTE[5],
-                linestyle="--",
-                linewidth=REFERENCE_LINEWIDTH,
-                alpha=0.65,
-            )
-
-        for treatment in TREATMENTS:
-            y = treatment_positions[treatment]
-            row = data.schedule.loc[data.schedule["treatment"].eq(treatment)].iloc[0]
-            if treatment == "M0":
-                calendar_ax.text(
-                    pd.Timestamp("2025-04-20"),
-                    y,
-                    "sin N experimental adicional",
-                    va="center",
-                    ha="left",
-                    fontsize=9,
-                    color=PLOT_PALETTE[5],
-                )
-                continue
-
-            dates = [row["first_application"], row["second_application"]]
-            calendar_ax.plot(
-                dates,
-                [y, y],
-                color=TREATMENT_COLORS[treatment],
-                marker=TREATMENT_MARKERS[treatment],
-                linewidth=DATA_LINEWIDTH,
-                markersize=MARKER_SIZE,
-                label=treatment,
-            )
-            for application_date in dates:
-                application_month = {6: "jun", 7: "jul", 8: "ago", 9: "sep"}[
-                    application_date.month
-                ]
-                calendar_ax.annotate(
-                    f"{application_date.day} {application_month}\n100 kg",
-                    xy=(application_date, y),
-                    xytext=(0, 8),
-                    textcoords="offset points",
-                    ha="center",
-                    va="bottom",
-                    fontsize=8.75,
-                    color=TREATMENT_COLORS[treatment],
-                )
-
-        calendar_ax.scatter(
-            [DATES[-1]],
-            [len(TREATMENTS) - 0.25],
-            marker="o",
-            s=46,
-            color=PLOT_PALETTE[4],
-            zorder=5,
-        )
-        calendar_ax.annotate(
-            "12 nov: muestreo final y cosecha",
-            xy=(DATES[-1], len(TREATMENTS) - 0.25),
-            xytext=(-6, 9),
-            textcoords="offset points",
-            ha="right",
-            va="bottom",
-            fontsize=9,
-            color=PLOT_PALETTE[4],
-        )
-        calendar_ax.set_yticks(
-            list(treatment_positions.values()),
-            list(treatment_positions.keys()),
-        )
-        calendar_ax.set_ylabel("Calendario")
-        calendar_ax.set_title("A. Aplicaciones experimentales y eventos de manejo")
-        calendar_ax.set_ylim(-0.55, len(TREATMENTS) - 0.02)
-
-        # Panel B: dosis experimental acumulada.
-        for treatment in TREATMENTS:
-            row = data.schedule.loc[data.schedule["treatment"].eq(treatment)].iloc[0]
-            if treatment == "M0":
-                x_values = [study_start, study_end]
-                y_values = [0.0, 0.0]
+            event_label = DATE_LABELS[sample_date]
+            if sample_date == DATES[-1]:
+                event_label += "\nmuestreo y cosecha"
             else:
-                x_values = [
-                    study_start,
-                    row["first_application"],
-                    row["second_application"],
-                    study_end,
-                ]
-                y_values = [0.0, 100.0, 200.0, 200.0]
-            cumulative_ax.step(
-                x_values,
-                y_values,
-                where="post",
-                color=TREATMENT_COLORS[treatment],
-                linestyle="--" if treatment == "M0" else "-",
-                linewidth=DATA_LINEWIDTH,
-                label=treatment,
-            )
-
-        for sample_date in DATES:
-            cumulative_ax.axvline(
+                event_label += "\nmuestreo"
+            ax.text(
                 sample_date,
-                color=PLOT_PALETTE[5],
-                linestyle="--",
-                linewidth=REFERENCE_LINEWIDTH,
-                alpha=0.65,
+                bottom_event_y,
+                event_label,
+                ha="center",
+                va="top",
+                fontsize=8.75,
+                color="0.38",
             )
 
-        cumulative_ax.scatter(
-            [DATES[0]],
-            [100],
-            color=TREATMENT_COLORS["M5"],
-            marker=TREATMENT_MARKERS["M5"],
-            s=55,
-            zorder=5,
-        )
-        cumulative_ax.annotate(
-            "16 sep: M5 = 100 kg; M1–M4 = 200 kg",
-            xy=(DATES[0], 100),
-            xytext=(10, -28),
-            textcoords="offset points",
-            arrowprops={"arrowstyle": "->", "linewidth": 0.9},
-            fontsize=9,
-            ha="left",
-        )
-        cumulative_ax.set_yticks([0, 100, 200])
-        cumulative_ax.set_ylim(-12, 225)
-        cumulative_ax.set_ylabel("N experimental\nacumulado (kg ha⁻¹)")
-        cumulative_ax.set_title("B. Dosis experimental acumulada")
-
-        month_ticks = pd.date_range("2025-04-01", "2025-11-01", freq="MS")
-        month_labels = ["abr", "may", "jun", "jul", "ago", "sep", "oct", "nov"]
-        cumulative_ax.set_xticks(month_ticks, month_labels)
-        cumulative_ax.set_xlim(study_start, study_end)
-
-        handles, labels = cumulative_ax.get_legend_handles_labels()
+        legend_handles = [
+            Patch(
+                facecolor=common_color,
+                alpha=0.29,
+                edgecolor="none",
+                label="N común acumulado",
+            ),
+            Line2D(
+                [0],
+                [0],
+                color=PLOT_PALETTE[3],
+                linewidth=DATA_LINEWIDTH,
+                label="N total aplicado",
+            ),
+            Line2D(
+                [0],
+                [0],
+                color=uncertainty_color,
+                linestyle=(0, (2.1, 2.3)),
+                linewidth=SECONDARY_LINEWIDTH,
+                label="tramo con fecha común no consignada",
+            ),
+        ]
         fig.legend(
-            handles,
-            labels,
-            title="Tratamiento",
-            loc="lower center",
-            bbox_to_anchor=(0.5, 0.075),
-            ncol=6,
+            handles=legend_handles,
+            loc="upper center",
+            bbox_to_anchor=(0.52, 0.885),
+            ncol=3,
+            columnspacing=2.0,
+            handlelength=2.3,
         )
         add_figure_header(
             fig,
-            "Cronograma del experimento y disponibilidad acumulada de N",
+            "Cronograma de aplicaciones y N aplicado acumulado por tratamiento",
+            subtitle=("común ≈164 + experimental (0 o 200) = ≈164–364 kg N ha⁻¹"),
         )
         add_figure_note(
             fig,
             (
-                "Bandas claras: aplicaciones generales comunes de abril (≈60 kg N ha⁻¹) y agosto "
-                "(≈52 kg N ha⁻¹), con fecha exacta no consignada. Líneas verticales punteadas: muestreos."
+                "Las rampas ubican aplicaciones comunes dentro de intervalos con fecha no consignada; "
+                "no representan liberación gradual. Al 16 sep: M1–M4 ≈364 y M5 ≈264 kg N ha⁻¹."
             ),
         )
         fig.subplots_adjust(
-            left=0.09,
-            right=0.98,
-            bottom=0.15,
-            top=0.88,
-            hspace=0.33,
+            left=0.15,
+            right=0.985,
+            bottom=0.145,
+            top=0.80,
         )
         save_figure(fig, "figura_01_cronograma_y_n_acumulado")
         mpl.show()
