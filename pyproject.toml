@@ -1,0 +1,57 @@
+[project]
+name = "festuca-probabilistic-analysis"
+version = "0.1.0"
+description = "Probabilistic analysis of the tall-fescue nitrogen-timing experiment"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "arviz==0.22.0",
+    "h5py>=3.12,<4",
+    "ipykernel>=6,<7",
+    "ipython>=9,<10",
+    "ipywidgets>=8.1,<9",
+    "jupyterlab>=4,<5",
+    "matplotlib>=3.8,<4",
+    "nbclient>=0.10,<1",
+    "nbconvert>=7.16,<8",
+    "nbformat>=5.10,<6",
+    "numpy>=1.26,<3",
+    "openpyxl>=3.1,<4",
+    "pandas>=2.2,<3",
+    "patsy>=1,<2",
+    "pymc==5.27.1",
+    "scipy>=1.11,<2",
+    "statsmodels>=0.14,<1",
+    "xarray>=2025,<2027",
+]
+
+[dependency-groups]
+dev = [
+    "black[jupyter]>=24.10,<27",
+    "flake8>=7,<8",
+    "flake8-cognitive-complexity>=0.1,<1",
+    "nbqa>=1.9,<2",
+    "nbdime>=4,<5",
+    "pandas-stubs>=2.3,<3",
+    "pillow>=11,<13",
+    "pyright>=1.1.390,<2",
+    "ruff>=0.15,<1",
+    "scipy-stubs>=1,<2",
+]
+
+[tool.black]
+target-version = ["py312"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+venv = ".venv"
+venvPath = "."
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[tool.uv]
+package = false

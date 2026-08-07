@@ -1,0 +1,61 @@
+# Festuca Technical Report
+# Generated from auto_classifier.shared.plotting_style's
+# editorial_scientific_report profile so this notebook remains portable.
+# RGB tuples are used because .mplstyle treats # as a comment marker.
+
+axes.axisbelow: True
+axes.edgecolor: (0.4196, 0.4510, 0.4863)
+axes.facecolor: (1.0000, 1.0000, 1.0000)
+axes.formatter.use_mathtext: True
+axes.formatter.useoffset: False
+axes.grid: True
+axes.grid.axis: y
+axes.labelcolor: (0.3373, 0.3804, 0.4196)
+axes.labelsize: 9
+axes.linewidth: 0.8
+axes.prop_cycle: cycler('color', [(0.0000, 0.4196, 0.6353), (0.6039, 0.3725, 0.0000), (0.0000, 0.4784, 0.4392), (0.7725, 0.2275, 0.2588), (0.4706, 0.2510, 0.3725), (0.2471, 0.3373, 0.3804), (0.0000, 0.4902, 0.5804), (0.5098, 0.4000, 0.2118), (0.4000, 0.4431, 0.0000)])
+axes.spines.bottom: True
+axes.spines.left: False
+axes.spines.right: False
+axes.spines.top: False
+axes.titlecolor: (0.1098, 0.1176, 0.1294)
+axes.titlelocation: left
+axes.titlepad: 10
+axes.titlesize: 12
+axes.titleweight: 700
+errorbar.capsize: 2
+figure.dpi: 120
+figure.facecolor: (0.9843, 0.9804, 0.9686)
+font.family: sans-serif
+font.sans-serif: Inter, Source Sans 3, IBM Plex Sans, Arial, Helvetica, DejaVu Sans
+font.size: 9
+grid.alpha: 1.0
+grid.color: (0.8510, 0.8706, 0.8902)
+grid.linewidth: 0.8
+image.cmap: viridis
+legend.borderaxespad: 0.4
+legend.fontsize: 8
+legend.frameon: False
+legend.handlelength: 1.6
+legend.handletextpad: 0.5
+legend.title_fontsize: 8
+lines.linewidth: 1.8
+lines.markeredgewidth: 0.8
+lines.markersize: 4.5
+patch.linewidth: 0.8
+savefig.bbox: tight
+savefig.dpi: 300
+savefig.facecolor: (0.9843, 0.9804, 0.9686)
+savefig.pad_inches: 0.06
+savefig.transparent: False
+text.color: (0.1098, 0.1176, 0.1294)
+xtick.color: (0.3373, 0.3804, 0.4196)
+xtick.labelsize: 8
+xtick.major.pad: 4
+xtick.major.size: 0
+xtick.minor.size: 0
+ytick.color: (0.3373, 0.3804, 0.4196)
+ytick.labelsize: 8
+ytick.major.pad: 4
+ytick.major.size: 0
+ytick.minor.size: 0
