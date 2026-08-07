@@ -1,6 +1,10 @@
 .DS_Store
 .venv/
+*.egg-info/
 .ruff_cache/
 .ipynb_checkpoints/
 __pycache__/
-festuca_probabilistic_outputs/posteriors/
+results/
+festuca_probabilistic_outputs/
+festuca_thesis_analysis_outputs/
+festuca_thesis_figures/

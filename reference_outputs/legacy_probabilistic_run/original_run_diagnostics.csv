@@ -1,0 +1,11 @@
+model_id,model_label,divergences,max_rhat,min_ess_bulk,ready
+model_a_secano_biomass,"Modelo A — biomasa, Secano",0,1.002,3351.682,True
+model_a_secano_n,"Modelo A — N, Secano",0,1.001,5000.417,True
+model_a_secano_yield,"Modelo A — rendimiento, Secano",0,1.0,4442.947,True
+model_a_riego_biomass,"Modelo A — biomasa, Riego",0,1.003,1644.609,True
+model_a_riego_n,"Modelo A — N, Riego",0,1.002,7428.379,True
+model_a_riego_yield,"Modelo A — rendimiento, Riego",0,1.001,4684.43,True
+model_b,Modelo B,0,1.002,2385.128,True
+model_c,Modelo C,0,1.015,259.524,False
+model_d,Modelo D,0,1.048,52.274,False
+reconstruction_null,Nulo de reconstrucción,0,1.002,2361.327,True

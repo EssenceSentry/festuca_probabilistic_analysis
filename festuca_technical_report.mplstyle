@@ -27,7 +27,7 @@ errorbar.capsize: 2
 figure.dpi: 120
 figure.facecolor: (0.9843, 0.9804, 0.9686)
 font.family: sans-serif
-font.sans-serif: Inter, Source Sans 3, IBM Plex Sans, Arial, Helvetica, DejaVu Sans
+font.sans-serif: DejaVu Sans, Inter, Source Sans 3, IBM Plex Sans, Arial, Helvetica
 font.size: 9
 grid.alpha: 1.0
 grid.color: (0.8510, 0.8706, 0.8902)

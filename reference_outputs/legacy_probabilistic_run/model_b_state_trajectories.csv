@@ -1,0 +1,145 @@
+sector,treatment,variable,label,date,posterior_median,lower_95,upper_95,p_gt_0,diagnostics_ready
+Secano,M0,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Sep,4495.173923155695,4059.424363603272,4954.514206675632,1.0,True
+Secano,M0,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Oct,6409.462588148017,5688.525068428232,7162.909012653978,1.0,True
+Secano,M0,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Nov,10651.074881971252,9306.076746690327,12029.1915695589,1.0,True
+Secano,M1,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Sep,7647.037797784794,6857.975977134906,8487.569410077775,1.0,True
+Secano,M1,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Oct,13352.876012039327,12036.419022701422,14889.561469087974,1.0,True
+Secano,M1,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Nov,14501.199935905706,13156.93457755796,15979.462815992743,1.0,True
+Secano,M2,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Sep,8056.072190142905,7064.963376336151,9222.788279034674,1.0,True
+Secano,M2,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Oct,13154.110048898056,11934.002250068264,14562.36948846409,1.0,True
+Secano,M2,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Nov,13802.352492900816,12507.274347043844,15256.420031454349,1.0,True
+Secano,M3,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Sep,6499.217665907974,5816.391636800534,7207.244251137124,1.0,True
+Secano,M3,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Oct,12874.63363010137,11576.500955746102,14249.982999511752,1.0,True
+Secano,M3,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Nov,13882.550994559482,12565.820318555649,15344.622732251835,1.0,True
+Secano,M4,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Sep,5858.446478870257,5264.174011220687,6564.16568963262,1.0,True
+Secano,M4,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Oct,11528.486586469277,10462.198635953408,12656.340232546989,1.0,True
+Secano,M4,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Nov,12359.535431707816,11152.283393410546,13699.67745154343,1.0,True
+Secano,M5,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Sep,4387.691013700974,3879.2949877934993,5054.375084006481,1.0,True
+Secano,M5,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Oct,9571.128767458433,8664.738913114108,10510.420514063386,1.0,True
+Secano,M5,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Nov,10829.743351419997,9797.91907636958,11943.525897340953,1.0,True
+Riego,M0,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Sep,4696.597703616519,4286.078916450892,5142.214980420708,1.0,True
+Riego,M0,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Oct,6137.883822161623,5544.149591518281,6833.520399223335,1.0,True
+Riego,M0,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Nov,11006.95034277736,9574.157925239107,12497.185136261276,1.0,True
+Riego,M1,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Sep,7882.584903718538,7130.101362746232,8706.193805054265,1.0,True
+Riego,M1,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Oct,13136.111409702418,11885.270249997382,14363.904983253007,1.0,True
+Riego,M1,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Nov,15115.663436945457,13710.502496879037,16711.967082373718,1.0,True
+Riego,M2,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Sep,8144.547177691929,7414.177375371624,8962.220230435554,1.0,True
+Riego,M2,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Oct,12445.299396819091,11383.527804965728,13555.170505218828,1.0,True
+Riego,M2,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Nov,13861.367736714916,12629.311645252305,15167.218238570293,1.0,True
+Riego,M3,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Sep,6341.495696010723,5712.816073366352,7043.180687407387,1.0,True
+Riego,M3,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Oct,11377.52037844718,10296.277793339415,12576.487322231138,1.0,True
+Riego,M3,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Nov,12988.633747831896,11795.948499704533,14288.987115199072,1.0,True
+Riego,M4,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Sep,6462.78953697261,5900.211032392466,7093.873911137979,1.0,True
+Riego,M4,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Oct,11132.7484733341,10089.759832750418,12377.879030278247,1.0,True
+Riego,M4,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Nov,12877.337095803374,11673.422578046568,14228.271716694708,1.0,True
+Riego,M5,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Sep,5238.571787493392,4637.694822610926,5941.22293808242,1.0,True
+Riego,M5,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Oct,9891.225300235668,8992.069040366596,10827.425050731725,1.0,True
+Riego,M5,biomass_state_kg_ha,Biomasa aérea latente (kg MS/ha),Nov,11650.59301993056,10593.44871651582,12845.877566638746,1.0,True
+Secano,M0,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Sep,53.257440559548925,47.26318102599404,60.028499720069625,1.0,True
+Secano,M0,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Oct,66.08729203123343,57.99925156157989,74.76240925680196,1.0,True
+Secano,M0,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Nov,94.01599554089267,80.86500661517718,108.18694957607124,1.0,True
+Secano,M1,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Sep,176.92406718834204,154.09932411338042,201.3977235761356,1.0,True
+Secano,M1,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Oct,196.3785594372044,173.6927170654198,223.25985255452164,1.0,True
+Secano,M1,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Nov,162.94936107625426,144.58350620233955,182.70782115347347,1.0,True
+Secano,M2,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Sep,169.58549385734082,145.505901481033,198.13891118952293,1.0,True
+Secano,M2,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Oct,191.24097270036805,169.93302348521988,217.1432607481498,1.0,True
+Secano,M2,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Nov,163.0513889261856,145.08772535092675,183.29220733838477,1.0,True
+Secano,M3,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Sep,134.44784675111538,117.80206329122308,151.67370161706148,1.0,True
+Secano,M3,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Oct,194.11650714614424,171.69052334809805,219.8123427997664,1.0,True
+Secano,M3,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Nov,153.7590922323247,137.1126624051813,172.75585782291458,1.0,True
+Secano,M4,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Sep,121.59733857155872,105.57251305121014,140.3811458359181,1.0,True
+Secano,M4,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Oct,200.94791044068245,179.30870491470898,223.48971546357015,1.0,True
+Secano,M4,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Nov,166.0110770816966,147.4893340540836,187.58819164085887,1.0,True
+Secano,M5,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Sep,82.58828934466564,71.72314628207788,96.28748549454104,1.0,True
+Secano,M5,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Oct,170.31942863813475,149.97414471975313,192.29842752771216,1.0,True
+Secano,M5,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Nov,131.8647497265846,116.44372556201203,148.8199457258215,1.0,True
+Riego,M0,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Sep,57.67175629088316,50.92672600151001,64.84728380144821,1.0,True
+Riego,M0,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Oct,64.6500114354213,57.60807833443975,72.62285051350722,1.0,True
+Riego,M0,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Nov,96.04321010129068,82.73902948960037,110.36517535031024,1.0,True
+Riego,M1,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Sep,190.3002763509789,167.73912954176137,216.5274399382676,1.0,True
+Riego,M1,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Oct,203.17785076452563,180.9627467950138,225.67204653358607,1.0,True
+Riego,M1,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Nov,167.67582786872833,149.394928122326,189.2975445422617,1.0,True
+Riego,M2,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Sep,179.00542121197077,157.28767948495786,204.07124303370568,1.0,True
+Riego,M2,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Oct,179.9559560501064,161.3701258612989,200.4316584823592,1.0,True
+Riego,M2,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Nov,158.55141434566303,142.15961739542885,176.48926499508462,1.0,True
+Riego,M3,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Sep,118.49465446196427,104.18883824041563,135.13272708231938,1.0,True
+Riego,M3,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Oct,153.1058415756973,136.28458759304388,172.2783450535619,1.0,True
+Riego,M3,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Nov,128.31845487724928,114.5956424089502,143.84144392275223,1.0,True
+Riego,M4,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Sep,130.81140074528622,116.0896101559514,148.1035979565051,1.0,True
+Riego,M4,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Oct,194.959563566754,174.09394225363974,219.5991906024945,1.0,True
+Riego,M4,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Nov,168.47051834663156,149.86074546186546,189.5810056011538,1.0,True
+Riego,M5,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Sep,102.9914949290412,89.47129567006364,119.19241382776376,1.0,True
+Riego,M5,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Oct,189.54838762701823,168.3657006206274,212.97178092406645,1.0,True
+Riego,M5,n_acc_state_kg_ha,N aéreo latente (kg N/ha),Nov,148.57434453816728,131.56275080364895,167.11097323847656,1.0,True
+Secano,M0,n_pct_state,Concentración de N latente (%),Sep,1.1844865294636653,1.111341109135876,1.2717449413464912,1.0,True
+Secano,M0,n_pct_state,Concentración de N latente (%),Oct,1.03249691156153,0.9748127710294102,1.090927703946023,1.0,True
+Secano,M0,n_pct_state,Concentración de N latente (%),Nov,0.884620991381094,0.8292078623260376,0.9428728688864456,1.0,True
+Secano,M1,n_pct_state,Concentración de N latente (%),Sep,2.318145984736672,2.1272942761064635,2.5125342540908027,1.0,True
+Secano,M1,n_pct_state,Concentración de N latente (%),Oct,1.4756523198447842,1.3771262940766584,1.5879331845163578,1.0,True
+Secano,M1,n_pct_state,Concentración de N latente (%),Nov,1.1300743765124284,1.0531124174485749,1.2051089435821438,1.0,True
+Secano,M2,n_pct_state,Concentración de N latente (%),Sep,2.1085353126726707,1.9485619263689204,2.2923194698555256,1.0,True
+Secano,M2,n_pct_state,Concentración de N latente (%),Oct,1.4575229832350425,1.3555417865546735,1.5776412893827998,1.0,True
+Secano,M2,n_pct_state,Concentración de N latente (%),Nov,1.180993914268409,1.102366813305672,1.2634306407116171,1.0,True
+Secano,M3,n_pct_state,Concentración de N latente (%),Sep,2.067033560927812,1.9372807713160447,2.1998095994711657,1.0,True
+Secano,M3,n_pct_state,Concentración de N latente (%),Oct,1.510800494423002,1.4005702486191691,1.6232271884000509,1.0,True
+Secano,M3,n_pct_state,Concentración de N latente (%),Nov,1.1067073356432613,1.038102400746508,1.1820847221693973,1.0,True
+Secano,M4,n_pct_state,Concentración de N latente (%),Sep,2.077450603830573,1.903968741117539,2.25837820685038,1.0,True
+Secano,M4,n_pct_state,Concentración de N latente (%),Oct,1.743573921146986,1.6399045189216628,1.852059088912952,1.0,True
+Secano,M4,n_pct_state,Concentración de N latente (%),Nov,1.3446539519342018,1.2573052789619972,1.441821714557039,1.0,True
+Secano,M5,n_pct_state,Concentración de N latente (%),Sep,1.879980486358916,1.7651790276477963,1.9985428914117211,1.0,True
+Secano,M5,n_pct_state,Concentración de N latente (%),Oct,1.7821198812793764,1.6447549278199751,1.9352012831624887,1.0,True
+Secano,M5,n_pct_state,Concentración de N latente (%),Nov,1.2199846983391578,1.1341210784587477,1.312872482697332,1.0,True
+Riego,M0,n_pct_state,Concentración de N latente (%),Sep,1.2301856394944068,1.1329218419485632,1.3283490848737078,1.0,True
+Riego,M0,n_pct_state,Concentración de N latente (%),Oct,1.0531268112200962,0.9983327304145546,1.115253265012315,1.0,True
+Riego,M0,n_pct_state,Concentración de N latente (%),Nov,0.873837792267664,0.8220537280356178,0.9307548298346966,1.0,True
+Riego,M1,n_pct_state,Concentración de N latente (%),Sep,2.4177992483756654,2.222250404439217,2.609788985509032,1.0,True
+Riego,M1,n_pct_state,Concentración de N latente (%),Oct,1.5486949807548376,1.455931904540076,1.6434408765851851,1.0,True
+Riego,M1,n_pct_state,Concentración de N latente (%),Nov,1.1146576712764191,1.0431122238906567,1.1937071817745235,1.0,True
+Riego,M2,n_pct_state,Concentración de N latente (%),Sep,2.197408356250436,2.0124344541466512,2.4051557524864866,1.0,True
+Riego,M2,n_pct_state,Concentración de N latente (%),Oct,1.448757068185315,1.3614915141699095,1.5485515111499328,1.0,True
+Riego,M2,n_pct_state,Concentración de N latente (%),Nov,1.1473506832577134,1.0776352972684422,1.2235591826940533,1.0,True
+Riego,M3,n_pct_state,Concentración de N latente (%),Sep,1.8713781663210152,1.7284105103277267,2.026611846380545,1.0,True
+Riego,M3,n_pct_state,Concentración de N latente (%),Oct,1.344265112191493,1.2614947687413294,1.443527590974379,1.0,True
+Riego,M3,n_pct_state,Concentración de N latente (%),Nov,0.9876391884772396,0.9247450112146266,1.055180261854502,1.0,True
+Riego,M4,n_pct_state,Concentración de N latente (%),Sep,2.02636361019106,1.8741231215469525,2.197362266689803,1.0,True
+Riego,M4,n_pct_state,Concentración de N latente (%),Oct,1.7531311257789124,1.6482257643284624,1.861782164793824,1.0,True
+Riego,M4,n_pct_state,Concentración de N latente (%),Nov,1.309283460728074,1.222377351917565,1.402138981354072,1.0,True
+Riego,M5,n_pct_state,Concentración de N latente (%),Sep,1.966649441233101,1.833710027955968,2.1109494055268407,1.0,True
+Riego,M5,n_pct_state,Concentración de N latente (%),Oct,1.9188458655016687,1.7790578796215135,2.067081656674592,1.0,True
+Riego,M5,n_pct_state,Concentración de N latente (%),Nov,1.2726900705466937,1.1837562832275823,1.3714976689749057,1.0,True
+Secano,M0,nni_revised,INN revisado latente,Sep,0.5660484594653528,0.5246340774296675,0.6137047655670355,1.0,True
+Secano,M0,nni_revised,INN revisado latente,Oct,0.5722709081415147,0.531337358185004,0.6145556319208818,1.0,True
+Secano,M0,nni_revised,INN revisado latente,Nov,0.6064003445939077,0.5567579682845452,0.6590546615475205,1.0,True
+Secano,M1,nni_revised,INN revisado latente,Sep,1.3843248649131428,1.2578604817148336,1.516412842355816,1.0,True
+Secano,M1,nni_revised,INN revisado latente,Oct,1.1128930571366769,1.0274852464159352,1.2096946853000805,1.0,True
+Secano,M1,nni_revised,INN revisado latente,Nov,0.881128170533653,0.8133101198408855,0.950550001827044,1.0,True
+Secano,M2,nni_revised,INN revisado latente,Sep,1.287427234634387,1.1695353869017169,1.421659569597132,1.0,True
+Secano,M2,nni_revised,INN revisado latente,Oct,1.091165626240624,1.0063864688609925,1.1949566468473594,1.0,True
+Secano,M2,nni_revised,INN revisado latente,Nov,0.903766358531244,0.8347359233308712,0.9772836120794618,1.0,True
+Secano,M3,nni_revised,INN revisado latente,Sep,1.1541888754935248,1.065252134729419,1.244020817059209,1.0,True
+Secano,M3,nni_revised,INN revisado latente,Oct,1.1221623466334747,1.0336185915512694,1.2203600166575546,1.0,True
+Secano,M3,nni_revised,INN revisado latente,Nov,0.8495219204415685,0.7883692918625639,0.9176947480360456,1.0,True
+Secano,M4,nni_revised,INN revisado latente,Sep,1.1105840147399189,1.0056888265511883,1.2230153576091518,1.0,True
+Secano,M4,nni_revised,INN revisado latente,Oct,1.237000028751366,1.1513475237093749,1.3262147961697497,1.0,True
+Secano,M4,nni_revised,INN revisado latente,Nov,0.9819071153215476,0.907329215100036,1.0633457491297735,1.0,True
+Secano,M5,nni_revised,INN revisado latente,Sep,0.8907788412637394,0.8197734516730835,0.9688921610699548,1.0,True
+Secano,M5,nni_revised,INN revisado latente,Oct,1.1692649129383197,1.0662624525070097,1.2800346916844885,1.0,True
+Secano,M5,nni_revised,INN revisado latente,Nov,0.8422939119320902,0.7753381210996549,0.917076691776653,1.0,True
+Riego,M0,nni_revised,INN revisado latente,Sep,0.5989885561227053,0.5463462958939921,0.6513365183656006,1.0,True
+Riego,M0,nni_revised,INN revisado latente,Oct,0.5740520399763281,0.5362007317777907,0.6148555724489766,1.0,True
+Riego,M0,nni_revised,INN revisado latente,Nov,0.6075069214675505,0.5595287354034969,0.6589671958629338,1.0,True
+Riego,M1,nni_revised,INN revisado latente,Sep,1.4628836156429526,1.3332516506336225,1.5984148998846512,1.0,True
+Riego,M1,nni_revised,INN revisado latente,Oct,1.1600496845857635,1.07728036712168,1.2427728929478263,1.0,True
+Riego,M1,nni_revised,INN revisado latente,Nov,0.8840655961465653,0.8189657889294408,0.9573197675704128,1.0,True
+Riego,M2,nni_revised,INN revisado latente,Sep,1.348393774152059,1.2259872791668152,1.4897543591233806,1.0,True
+Riego,M2,nni_revised,INN revisado latente,Oct,1.061087231585454,0.9862866076364232,1.1434056485186168,1.0,True
+Riego,M2,nni_revised,INN revisado latente,Nov,0.8783797556255788,0.818149929340785,0.9458276392700076,1.0,True
+Riego,M3,nni_revised,INN revisado latente,Sep,1.0333231282761628,0.9444743613610986,1.1326307584789626,1.0,True
+Riego,M3,nni_revised,INN revisado latente,Oct,0.9491227099092716,0.8795789030513059,1.029021294036846,1.0,True
+Riego,M3,nni_revised,INN revisado latente,Nov,0.7370981758435123,0.6832887670402197,0.7961778669434146,1.0,True
+Riego,M4,nni_revised,INN revisado latente,Sep,1.127867093029882,1.0328878378852733,1.2344033129264833,1.0,True
+Riego,M4,nni_revised,INN revisado latente,Oct,1.2269171201873612,1.1427404797918688,1.320430782020622,1.0,True
+Riego,M4,nni_revised,INN revisado latente,Nov,0.9737736639001984,0.9023645348373156,1.0534381988724717,1.0,True
+Riego,M5,nni_revised,INN revisado latente,Sep,1.0026825472466805,0.9181684510975096,1.0965150946811588,1.0,True
+Riego,M5,nni_revised,INN revisado latente,Oct,1.2757038242897805,1.1728791689832272,1.3856821679918925,1.0,True
+Riego,M5,nni_revised,INN revisado latente,Nov,0.907815132802866,0.8343123176899633,0.986367136092532,1.0,True

@@ -12,11 +12,11 @@ Lo que impide considerar la versión actual lista no es una falla única, sino u
 
 Hay además tres asuntos concretos que deberían resolverse antes de la entrega:
 
-- **La fórmula de imputación de la celda faltante está mal escrita y mal aplicada.** Con la notación usada en la tesis, se intercambiaron los coeficientes de los totales de bloque y tratamiento. La imputación correcta para el diseño completo es 2,86885 % N, no 2,48579 % N. El resultado principal no cambia al 5 %, pero la sensibilidad sí cambia de forma material.
+- **La fórmula de imputación de la celda faltante permanece mal escrita y mal aplicada en la tesis.** Con la notación usada en `tesis.md`, se intercambiaron los coeficientes de los totales de bloque y tratamiento. La imputación correcta para el diseño completo es 2,86885 % N, no 2,48579 % N. El código longitudinal actual ya usa la fórmula y el valor correctos; falta trasladar esa corrección al texto de la tesis.
 - **Hay que verificar la cronología ejecutada y el manejo del pastoreo.** M1 y M2 recibieron su primera aplicación antes del cierre del 1.º de julio. Si los animales siguieron accediendo a las parcelas, el tratamiento temprano quedó combinado con defoliación, posible redistribución de N y una exposición diferencial. Además, el libro contiene fechas preliminares/conflictivas y años 2026 para un ensayo realizado en 2025.
 - **La supuesta compensación entre panojas y semillas estimadas por panoja no está demostrada.** El número de semillas por panoja fue reconstruido usando el rendimiento y el número de panojas; una relación inversa con panojas aparece mecánicamente por la fórmula. El análisis nulo agregado por Agustín muestra que la correlación observada queda aproximadamente en el percentil 49 de la distribución inducida por esa reconstrucción. Por tanto, no aporta evidencia independiente de compensación biológica.
 
-Mi recomendación central coincide en buena medida con la intuición de Agustín, pero la haría un poco más fuerte: **el análisis longitudinal debería integrar el cuerpo principal, no quedar como una curiosidad complementaria**. Los ANOVA por fecha pueden conservarse como análisis de seguimiento y para mostrar medias puntuales, pero una tesis cuyo objetivo es “caracterizar la respuesta temporal” necesita probar directamente tratamiento × fecha. El anexo probabilístico sí puede quedar en un anexo, reducido a los módulos que agregan una pregunta científica nueva y cuya reproducibilidad quede cerrada.
+Mi recomendación central coincide en buena medida con la intuición de Agustín, pero la haría un poco más fuerte: **el análisis longitudinal debería integrar el cuerpo principal, no quedar como una curiosidad complementaria**. Los ANOVA por fecha pueden conservarse como análisis de seguimiento y para mostrar medias puntuales, pero una tesis cuyo objetivo es “caracterizar la respuesta temporal” necesita probar directamente tratamiento × fecha. El anexo probabilístico sí puede quedar en un anexo, reducido a los módulos que agregan una pregunta científica nueva y con el alcance de reproducción descrito explícitamente.
 
 ---
 
@@ -25,9 +25,24 @@ Mi recomendación central coincide en buena medida con la intuición de Agustín
 Para evitar mezclar responsabilidades:
 
 - **Tesis de Emanuel Choca y Serrana Montero:** el contenido de `sources/` y su transcripción exacta en `tesis.md`.
-- **Material analítico agregado por Agustín:** `festuca_estudio_longitudinal.ipynb`, `festuca_anexo_probabilistico.ipynb`, sus versiones Markdown, el código, figuras, diagramas y archivos derivados fuera de `sources/`.
+- **Material analítico agregado por Agustín:** `festuca_estudio_longitudinal.ipynb`, `festuca_anexo_probabilistico.ipynb`, el paquete `src/festuca_analysis/`, las pruebas de `tests/`, las figuras y los archivos derivados fuera de `sources/`.
 
-Las objeciones a la formulación científica, documentación de campo, métodos originales, resultados y redacción se refieren a la tesis. Las observaciones sobre reproducibilidad, modelos mixtos, modelos probabilísticos y figuras específicas se refieren al material agregado. Hay un error compartido: la fórmula incorrecta de imputación aparece tanto en la tesis como en el cuaderno longitudinal.
+Las objeciones a la formulación científica, documentación de campo, métodos originales, resultados y redacción se refieren a la tesis. Las observaciones sobre reproducibilidad, modelos mixtos, modelos probabilísticos y figuras específicas se refieren al material agregado. La fórmula incorrecta de imputación aparece todavía en `tesis.md`, pero fue corregida en el cuaderno y en el paquete de análisis.
+
+### 1.1 Estado del código al cerrar esta revisión
+
+El código auditado tiene actualmente la siguiente estructura y alcance:
+
+- la lógica estadística vive en el paquete `src/festuca_analysis/`; los notebooks contienen llamadas de alto nivel y texto narrativo;
+- `uv run --frozen festuca-longitudinal` y `uv run --frozen festuca-annex` regeneran las tablas y figuras correspondientes;
+- la imputación usa la fórmula correcta y permanece solo como sensibilidad;
+- los modelos mixtos prueban los optimizadores configurados y seleccionan el ajuste convergido con mayor log-verosimilitud;
+- las interacciones de las variables primitivas usan *bootstrap* paramétrico reproducible y ajuste FDR de Benjamini–Hochberg;
+- EAN y productividad aparente del agua se resumen descriptivamente, sin repetir pruebas inferenciales sobre transformaciones deterministas del rendimiento;
+- el anexo incluye priors numéricos, chequeos predictivos previos y una validación independiente del muestreador contra PyMC y mediante simulación-recuperación;
+- los dos notebooks fueron ejecutados completamente y no contienen salidas de error.
+
+Persisten dos límites que el código no puede resolver por sí solo: verificar documentalmente los registros 150/152 y volver a muestrear tres componentes probabilísticos históricos para los que se conservaron resúmenes aceptados, pero no las cadenas completas.
 
 No hice una verificación bibliográfica externa de cada afirmación agronómica ni de cada referencia. La revisión se concentra en la coherencia interna entre diseño, datos, análisis e inferencias.
 
@@ -75,17 +90,17 @@ Esa combinación es una conclusión científicamente útil. No hace falta fabric
 
 | Prioridad | Problema | Riesgo si no se corrige | Acción mínima |
 |---|---|---|---|
-| **P0** | Fórmula de imputación incorrecta | Error matemático verificable en Métodos y sensibilidad | Corregir fórmula, valor y todos los resultados derivados; corregir también el cuaderno longitudinal |
+| **P0** | Fórmula de imputación incorrecta en la tesis | Error matemático verificable en Métodos y sensibilidad | Corregir fórmula y valor en `tesis.md`; el código y las sensibilidades actuales ya están corregidos |
 | **P0** | Cronología ejecutada y posible pastoreo después de M1/M2 | Posible confusión diferencial del tratamiento temprano | Revisar bitácora; documentar exclusión real de animales, fechas ejecutadas y orden muestreo/aplicación |
 | **P0** | Inferencia de compensación desde una variable reconstruida | Conclusión biológica apoyada en acoplamiento algebraico | Retirar del resumen y conclusiones; reformular como descomposición no independiente o hipótesis no probada |
 | **P0/P1** | Pregunta longitudinal analizada principalmente con ANOVA separados | No se prueba formalmente el cambio de trayectorias ni la “convergencia” | Incorporar modelo repetido/mixto tratamiento × fecha en Métodos y Resultados principales |
-| **P1** | Dos valores de %MS final inconsistentes con pesos crudos | Pueden alterar biomasa, N acumulado e INN finales | Verificar registros 150 y 152; reportar sensibilidad si no se resuelve |
+| **P1** | Dos valores de %MS final inconsistentes con pesos crudos | Pueden alterar biomasa, N presente en biomasa e INN finales | Verificar registros 150 y 152; reportar sensibilidad si no se resuelve |
 | **P1** | Tratamiento denominado “momento” aunque son paquetes de dos fechas, con intervalos distintos | Se atribuyen efectos a una variable que no fue aislada | Usar “calendario” o “distribución temporal”; evitar inferir efecto de primera/segunda fecha por separado |
 | **P1** | No significancia tratada parcialmente como convergencia/equivalencia | Sobreinterpretación del ensayo con n = 4 | Estimar interacciones, efectos e intervalos; declarar que no hubo ganador y tampoco se demostró equivalencia |
-| **P1** | Multiplicidad y jerarquía de resultados poco explícitas | Hallazgos marginales pueden parecer confirmatorios | Definir resultado primario, secundarios y exploratorios; controlar FDR o interpretar exploratoriamente |
+| **P1** | Multiplicidad y jerarquía de resultados poco explícitas en la tesis | Hallazgos marginales pueden parecer confirmatorios | Incorporar en la tesis la jerarquía y el control FDR ya implementados en el análisis |
 | **P1** | Correlaciones M0–M5 dominadas por la separación de dosis y variables acopladas | Relaciones presentadas como mecanismo sin evidencia independiente | Restringir a M1–M5, ajustar tratamiento/bloque y reducir correlaciones del cuerpo principal |
-| **P1** | Anexo probabilístico no reproducible de extremo a extremo en el ZIP | Resultados importados sin artefactos ni generador disponible | Incluir pipeline completo o artefactos versionados con checksum; validar el muestreador personalizado |
-| **P2** | Exceso de tablas y ausencia total de figuras | La tesis es difícil de leer y oculta magnitud/incertidumbre | Incorporar 3–4 figuras centrales y trasladar tablas detalladas al anexo |
+| **P1** | Tres módulos probabilísticos históricos no se vuelven a muestrear desde el Excel | Los artefactos finales se regeneran, pero esos módulos dependen de resúmenes congelados | Conservar la limitación explícita; si se exige reproducción de cadenas, recuperar o reimplementar esos generadores |
+| **P2** | Exceso de tablas y ausencia de figuras en la tesis | La tesis es difícil de leer y oculta magnitud/incertidumbre | Insertar 3–4 de las figuras ya generadas por el análisis y trasladar tablas detalladas al anexo |
 | **P2** | Métricas redundantes derivadas de rendimiento | Duplica inferencia sin información nueva | Reducir EAN y productividad aparente del agua a descripción o anexo |
 | **P2** | Detalles metodológicos insuficientes | Reproducibilidad agronómica incompleta | Añadir suelo, laboratorio, muestreo, riego, madurez y manejo de franjas destructivas |
 
@@ -136,7 +151,7 @@ El 16 de septiembre, M1–M4 ya habían recibido 200 kg N ha⁻¹ experimentales
 - el menor estado de M5 puede ser efecto del retraso, de tener la mitad de dosis aplicada o de ambos;
 - una sensibilidad M1–M4 es apropiada.
 
-El cuaderno longitudinal ya calcula esa sensibilidad. En septiembre, restringiendo a M1–M4, se mantienen diferencias de biomasa en secano y riego, y de N acumulado/INN principalmente en riego. Esto fortalece parte de la narrativa temprana sin atribuir a calendario lo que es dosis transitoria.
+El cuaderno longitudinal ya calcula esa sensibilidad. En septiembre, restringiendo a M1–M4, se mantienen diferencias de biomasa en secano y riego, y de N presente en biomasa/INN principalmente en riego. Esto fortalece parte de la narrativa temprana sin atribuir a calendario lo que es dosis transitoria.
 
 ### 4.4 Falta anclar los calendarios a fenología observada
 
@@ -224,7 +239,7 @@ Estas preguntas no deberían mezclarse en un único omnibus M0–M5 ni interpret
 
 ### 5.2 El análisis longitudinal debería ser principal para las variables repetidas
 
-La tesis analiza biomasa, concentración de N, N aéreo e INN mediante ANOVA separados por fecha. Esos ANOVA responden correctamente a “¿había diferencias en esta fecha?”, pero no a:
+La tesis analiza biomasa, concentración de N, N presente en biomasa e INN mediante ANOVA separados por fecha. Esos ANOVA responden correctamente a “¿había diferencias en esta fecha?”, pero no a:
 
 - “¿las trayectorias difirieron?”;
 - “¿la ventaja temprana se redujo?”;
@@ -235,71 +250,72 @@ Inferir convergencia porque un p es significativo en septiembre y no lo es en no
 
 Por sector, una formulación razonable es:
 
-\[
+$$
 Y_{ijk}=\mu+B_j+T_i+F_k+(T\times F)_{ik}+u_{ij}+\varepsilon_{ijk},
-\]
+$$
 
 donde `fecha` se trata como factor categórico, `bloque` como efecto fijo, y `u_{ij}` es un intercepto aleatorio de parcela. El modelo debe ajustarse primero a M1–M5; M0–M5 queda como análisis complementario.
 
-Los resultados del cuaderno agregado son informativos:
+Los resultados actuales del cuaderno son los siguientes. Para biomasa y concentración de N, la inferencia de la interacción usa *bootstrap* paramétrico; N presente en biomasa e INN son variables derivadas de apoyo y conservan el LRT asintótico. El valor `q` es el ajuste de Benjamini–Hochberg dentro de la familia correspondiente.
 
-| Variable | Sector | p calendario promedio | p calendario × fecha | Lectura principal |
-|---|---:|---:|---:|---|
-| Biomasa aérea | Secano | < 0,0001 | 0,0746 | Diferencias medias claras; evidencia solo sugestiva de trayectorias no paralelas |
-| Biomasa aérea | Riego | < 0,0001 | 0,7863 | Diferencias medias, pero sin evidencia de distinta forma temporal |
-| N en biomasa (%) | Secano | 0,3780 | 0,0088 | El orden cambia entre fechas |
-| N en biomasa (%) | Riego | 0,0069 | < 0,0001 | Diferencias y cambio temporal claros |
-| N aéreo | Secano | 0,0015 | 0,0004 | Trayectorias claramente diferentes |
-| N aéreo | Riego | 0,0008 | 0,0004 | Trayectorias claramente diferentes |
-| INN | Secano | 0,0508 | < 0,0001 | Cambio temporal claro; promedio fronterizo |
-| INN | Riego | 0,0028 | < 0,0001 | Diferencias y cambio temporal claros |
+| Variable | Sector | p calendario promedio | p interacción usada | q BH | Lectura principal |
+|---|---:|---:|---:|---:|---|
+| Biomasa aérea | Secano | < 0,0001 | 0,225 | 0,300 | Diferencias medias claras, sin evidencia robusta de distinta forma temporal en la escala original |
+| Biomasa aérea | Riego | < 0,0001 | 0,900 | 0,900 | Diferencias medias, sin evidencia de distinta forma temporal |
+| N en biomasa (%) | Secano | 0,3780 | 0,050 | 0,100 | Señal limítrofe de interacción que no persiste al controlar FDR |
+| N en biomasa (%) | Riego | 0,0069 | 0,005 | 0,020 | Diferencias y cambio temporal claros |
+| N presente en biomasa | Secano | 0,0015 | 0,0004 | 0,0004 | Interacción clara, como evidencia derivada de apoyo |
+| N presente en biomasa | Riego | 0,0008 | 0,0004 | 0,0004 | Interacción clara, como evidencia derivada de apoyo |
+| INN | Secano | 0,0508 | < 0,0001 | < 0,0001 | Cambio temporal claro en una variable derivada |
+| INN | Riego | 0,0028 | < 0,0001 | < 0,0001 | Diferencias y cambio temporal claros en una variable derivada |
 
-Esto obliga a matizar una parte de la historia actual: el desplazamiento temporal de concentración de N y estado nitrogenado está bien respaldado; la idea de “convergencia de biomasa” es mucho menos clara, especialmente en riego.
+Esto obliga a una lectura más sobria que la basada en los LRT originales. La evidencia primitiva más clara de trayectorias diferentes está en la concentración de N de riego. La interacción de biomasa no está respaldada en la escala original y, en secano, es sensible a la transformación: el *bootstrap* da p = 0,225 en escala original y p = 0,010 en escala logarítmica. Por tanto, no debe presentarse como una conclusión robusta a la especificación.
 
-#### Refinamientos recomendables del modelo
+#### Estado y límites del modelo actual
 
-El cuaderno usa un intercepto aleatorio de parcela y error residual homogéneo. Es una mejora sustantiva sobre ANOVA separados, pero no debería considerarse la única especificación posible:
+El código actual prueba cinco optimizadores, conserva el ajuste convergido con mayor log-verosimilitud, registra los casos de varianza del intercepto aleatorio en el límite y usa 199 réplicas de *bootstrap* paramétrico para las interacciones primitivas M1–M5. También informa la relación entre la mayor y la menor desviación residual por fecha y repite biomasa en escala logarítmica.
 
-- los residuos de biomasa probablemente aumentan de escala entre septiembre y noviembre;
-- una transformación logarítmica o un modelo con varianza residual por fecha puede ser más realista;
-- con solo 20 parcelas en M1–M5 por sector, los LRT asintóticos pueden ser optimistas;
-- sería ideal usar grados de libertad de Satterthwaite/Kenward–Roger o *parametric bootstrap* para interacciones importantes;
-- la varianza del intercepto aleatorio queda en cero en varios ajustes, lo que indica poca evidencia de correlación residual persistente después de fecha, bloque y tratamiento. No invalida el modelo, pero sugiere que un GLS con estructura de varianza/correlación simple podría ser igual o más estable.
+Quedan límites que deben acompañar la interpretación:
 
-El objetivo no es construir un modelo sofisticado por deporte. Es probar directamente la afirmación temporal y presentar estimaciones con intervalos.
+- el modelo principal todavía supone una única varianza residual, aunque los diagnósticos muestran heterogeneidad por fecha, especialmente para concentración de N;
+- la varianza del intercepto aleatorio queda en el límite en varios ajustes, señal de poca evidencia de correlación persistente una vez incluidos fecha, bloque y tratamiento;
+- 199 réplicas proporcionan una resolución Monte Carlo de 0,005, suficiente para la auditoría actual pero modesta para fijar p-valores muy próximos a un umbral; una versión final podría usar al menos 999;
+- la discrepancia entre escalas de biomasa en secano debe presentarse como sensibilidad, no resolverse eligiendo retrospectivamente la escala más favorable.
+
+El objetivo no es construir un modelo sofisticado por deporte. Es probar directamente la afirmación temporal, presentar estimaciones con intervalos y mostrar cuándo la conclusión depende de la especificación.
 
 ### 5.3 La fórmula de la celda faltante es incorrecta
 
 En `tesis.md:L584-L590` se presenta:
 
-\[
+$$
 \hat{x}=\frac{rB+tT-G}{(r-1)(t-1)},
-\]
+$$
 
 con `r` = número de bloques, `t` = número de tratamientos, `B` = total del bloque que contiene el faltante y `T` = total del tratamiento que contiene el faltante.
 
 Con esas definiciones, la fórmula estándar para una celda faltante en un DBCA es:
 
-\[
+$$
 \hat{x}=\frac{tB+rT-G}{(t-1)(r-1)}.
-\]
+$$
 
-Los coeficientes de `B` y `T` están intercambiados en la tesis y en `festuca_estudio_longitudinal_markdown.md:L151-L159`.
+Los coeficientes de `B` y `T` están intercambiados en la tesis. El código actual en `src/festuca_analysis/longitudinal.py` y la salida ejecutada de `festuca_estudio_longitudinal.ipynb` ya contienen la expresión correcta.
 
 Para M1–R4–secano–16/09:
 
-- total del bloque sin la celda: \(B=9,8771379\);
-- total del tratamiento sin la celda: \(T=7,0041859\);
-- total general sin la celda: \(G=44,2468436\);
-- \(r=4\), \(t=6\).
+- total del bloque sin la celda: $B=9,8771379$;
+- total del tratamiento sin la celda: $T=7,0041859$;
+- total general sin la celda: $G=44,2468436$;
+- $r=4$, $t=6$.
 
 La imputación correcta en el diseño completo es:
 
-\[
+$$
 \hat{x}=2,8688485\%N.
-\]
+$$
 
-El valor publicado, 2,4857882, proviene exactamente de la fórmula invertida. En la comparación M1–M5 de concentración de N en septiembre, el p cambia aproximadamente así:
+El valor de 2,4857882 que permanece en `tesis.md` proviene exactamente de la fórmula invertida. En la comparación M1–M5 de concentración de N en septiembre, el p cambia aproximadamente así:
 
 | Tratamiento del faltante | p global M1–M5 |
 |---|---:|
@@ -308,7 +324,7 @@ El valor publicado, 2,4857882, proviene exactamente de la fórmula invertida. En
 | Imputación correcta usando diseño M0–M5 | 0,0829 |
 | Imputación correcta calculada solo en M1–M5 | 0,1130 |
 
-No cruza 0,05, pero se acerca bastante más. Debe corregirse porque es un error verificable y porque afecta también N aéreo e INN de la sensibilidad. La recomendación sigue siendo no imputar en el análisis principal; un modelo de máxima verosimilitud puede usar las demás observaciones bajo una hipótesis MAR sin rellenar el dato.
+No cruza 0,05, pero se acerca bastante más. La tesis debe corregirse porque es un error verificable y porque afecta también N presente en biomasa e INN de la sensibilidad. El análisis actual mantiene correctamente la observación como faltante en el análisis principal; el modelo de máxima verosimilitud usa las demás observaciones bajo una hipótesis MAR sin rellenar el dato.
 
 ### 5.4 No significancia no demuestra equivalencia práctica
 
@@ -341,19 +357,19 @@ Aproximadamente se realizan:
 
 Con este volumen, algunos p cercanos a 0,05 son esperables aun sin señales reales. Tukey controla el error dentro de cada familia de comparaciones, no a través de todas las variables, fechas y sectores.
 
-La solución no tiene que ser una corrección Bonferroni indiscriminada. Conviene declarar una jerarquía:
+La solución no tiene que ser una corrección Bonferroni indiscriminada. El código actual ya declara la siguiente jerarquía, que debe trasladarse a Métodos, Resultados y Discusión de la tesis:
 
 - **Resultado primario:** rendimiento de semilla limpia, comparación M1–M5 por sector.
 - **Contraste complementario predefinido:** promedio M1–M5 frente a M0.
 - **Resultados secundarios clave:** biomasa aérea y concentración de N longitudinales, con interacción tratamiento × fecha.
-- **Variables derivadas/apoyo:** N aéreo, INN, componentes finales.
+- **Variables derivadas/apoyo:** N presente en biomasa, INN, componentes finales.
 - **Exploratorio:** correlaciones, EAN, productividad aparente del agua y sensibilidades.
 
-Para las tablas exploratorias se puede usar FDR o, como mínimo, evitar lenguaje confirmatorio y enfatizar magnitudes e intervalos.
+El análisis actual aplica FDR de Benjamini–Hochberg dentro de las familias definidas y etiqueta el nivel inferencial de cada salida. Las tablas exploratorias deben mantener lenguaje no confirmatorio y enfatizar magnitudes e intervalos aun cuando un `q` sea pequeño.
 
 ### 5.6 Las correlaciones M0–M5 mezclan preguntas y están parcialmente inducidas
 
-Las correlaciones con las 24 parcelas de cada sector están dominadas en varios casos por la separación entre M0 y los fertilizados. Por ejemplo, el cuaderno de auditoría muestra:
+Las correlaciones con las 24 parcelas de cada sector están dominadas en varios casos por la separación entre M0 y los fertilizados. El análisis actual las etiqueta como exploratorias, marca las variables matemáticamente acopladas, presenta M1–M5 y residuales ajustados, y calcula FDR. Como evidencia del problema que debe corregirse en la tesis, muestra:
 
 | Variable final vs rendimiento | Sector | r M0–M5 | r M1–M5 | r residual ajustando tratamiento y bloque |
 |---|---|---:|---:|---:|
@@ -361,8 +377,8 @@ Las correlaciones con las 24 parcelas de cada sector están dominadas en varios 
 | Biomasa | Riego | 0,286 | 0,183 | −0,107 |
 | N (%) | Secano | 0,565 | 0,079 | −0,403 |
 | N (%) | Riego | 0,531 | 0,069 | 0,016 |
-| N aéreo | Secano | 0,791 | 0,448 | 0,006 |
-| N aéreo | Riego | 0,583 | 0,211 | −0,094 |
+| N presente en biomasa | Secano | 0,791 | 0,448 | 0,006 |
+| N presente en biomasa | Riego | 0,583 | 0,211 | −0,094 |
 
 La asociación bruta responde en gran medida a “las parcelas con N adicional rindieron más”, no a una relación parcela-a-parcela independiente dentro de calendarios comparables. `tesis.md:L1231` debería moderarse de forma importante.
 
@@ -371,22 +387,22 @@ A esto se suma el acoplamiento matemático:
 - semillas estimadas por panoja contiene rendimiento y panojas;
 - índice de cosecha contiene rendimiento;
 - merma contiene masa limpia;
-- N aéreo contiene biomasa y N%;
+- N presente en biomasa contiene biomasa y N%;
 - INN es función de biomasa y N%;
 - EAN es una transformación del rendimiento contra M0;
 - productividad aparente del agua es rendimiento dividido por una constante sectorial.
 
-Analizar estas variables como columnas distintas no genera evidencia independiente. Las correlaciones deberían ir al anexo o reducirse a pocas relaciones no tautológicas, mostrando M1–M5 y ajuste por tratamiento/bloque.
+Analizar estas variables como columnas distintas no genera evidencia independiente. El cuaderno ya las relega a auditoría exploratoria; la tesis debería hacer lo mismo o reducirlas a pocas relaciones no tautológicas.
 
 ### 5.7 La “compensación” entre componentes no está identificada
 
 La fórmula usada es:
 
-\[
+$$
 \widehat{S}=\frac{1000M_{\text{limpia}}}{W_{1000}P},
-\]
+$$
 
-donde \(P\) es densidad de panojas. Incluso si masa limpia, PMS y panojas fueran generados sin ningún mecanismo de compensación, dividir por \(P\) induce una asociación inversa entre \(P\) y \(\widehat{S}\).
+donde $P$ es densidad de panojas. Incluso si masa limpia, PMS y panojas fueran generados sin ningún mecanismo de compensación, dividir por $P$ induce una asociación inversa entre $P$ y $\widehat{S}$.
 
 El nulo de reconstrucción de Agustín encuentra:
 
@@ -406,11 +422,13 @@ Dentro de cada sector, todos los tratamientos M1–M5 tienen el mismo incremento
 
 La productividad aparente del agua divide rendimiento por 510 mm en secano o 675 mm en riego. Dentro de cada sector, conserva exactamente el orden, p y estructura de incertidumbre del rendimiento. Entre sectores, el denominador es mayor por definición en riego y no representa agua consumida. Es una métrica descriptiva débil y potencialmente confusa.
 
-Recomendación:
+El código actual implementa la política adecuada:
 
-- mantener EAN en un párrafo o tabla suplementaria, sin una sección inferencial propia;
-- mover productividad aparente del agua al anexo o eliminarla del núcleo argumental;
-- no usar ninguna de las dos como evidencia adicional de la hipótesis de sincronización.
+- resume EAN descriptivamente, sin una sección inferencial propia;
+- resume productividad aparente del agua como transformación descriptiva del rendimiento;
+- no usa ninguna de las dos como evidencia independiente de la hipótesis de sincronización.
+
+La tesis debe adoptar la misma jerarquía y moverlas al anexo o reducirlas a un párrafo descriptivo.
 
 ### 5.9 Inconsistencia en el uso de Tukey
 
@@ -430,7 +448,7 @@ Los registros finales 150 y 152 presentan discrepancias fuertes entre `%MS` ingr
 - registro 150, riego M4 R4: 118/420 = 28,10 %, pero se registró 18,2 %;
 - registro 152, riego M2 R4: 101/667 = 15,14 %, pero se registró 25,0 %.
 
-La tesis afirma que no hay evidencia de error de medición/registro. Esa frase es demasiado fuerte hasta revisar formularios originales, hojas de laboratorio o unidades. El análisis de sensibilidad agregado muestra que las conclusiones globales son razonablemente robustas, pero algunos p finales cambian. Eso es tranquilizador, no una razón para omitir la verificación.
+La tesis afirma que no hay evidencia de error de medición/registro. Esa frase es demasiado fuerte hasta revisar formularios originales, hojas de laboratorio o unidades. El análisis actual formaliza las tres políticas —registrado, cociente y exclusión— para biomasa, N presente en biomasa e INN, en M1–M5 y M0–M5. En riego M1–M5, por ejemplo, el p de biomasa cambia de 0,0686 a 0,2423 o 0,0735; el de N presente en biomasa, de 0,1037 a 0,1666 o 0,0777; y el de INN, de 0,0512 a 0,0823 o 0,0666. Esto muestra sensibilidad cerca del umbral y refuerza, no reemplaza, la necesidad de verificar la fuente primaria.
 
 La política correcta es:
 
@@ -526,7 +544,7 @@ La reorganizaría así:
 2. **Resultado primario:** una figura de rendimiento con las dos escalas M0–M5 y M1–M5.
 3. **Trayectorias temporales:** figuras de biomasa y N%, con resultados de interacción.
 4. **Componentes finales:** una figura o tabla compacta de panojas y PMS; semillas estimadas explícitamente marcada como reconstruida.
-5. **Resultados suplementarios:** N aéreo, INN, análisis por fecha, EAN, PAA, correlaciones y diagnósticos al anexo.
+5. **Resultados suplementarios:** N presente en biomasa, INN, análisis por fecha, EAN, PAA, correlaciones y diagnósticos al anexo.
 
 Las frases interpretativas como “consistente con la proximidad de la aplicación” deberían trasladarse a Discusión. En Resultados conviene describir estimaciones, intervalos y contrastes.
 
@@ -547,7 +565,7 @@ La discusión tiene una estructura razonable, pero su mecanismo central es más 
 
 #### Trayectoria temporal
 
-`tesis.md:L1155-L1167` debe reescribirse usando el modelo longitudinal. La concentración de N, N aéreo e INN muestran evidencia clara de interacción; biomasa no muestra una interacción clara en riego y solo sugestiva en secano. No conviene afirmar una convergencia general de biomasa o N aéreo únicamente desde ANOVA puntuales.
+`tesis.md:L1155-L1167` debe reescribirse usando el modelo longitudinal actual. La concentración de N muestra una interacción clara en riego; en secano queda en p = 0,050 por *bootstrap* y q = 0,100. N presente en biomasa e INN muestran interacciones como evidencia derivada de apoyo. Biomasa no muestra interacción en la escala original de ninguno de los sectores, y el resultado de secano cambia en escala logarítmica. No conviene afirmar una convergencia general ni seleccionar una escala retrospectivamente.
 
 También debe sustituirse “producción” por “biomasa presente” y reconocer que M5 tenía media dosis acumulada en septiembre.
 
@@ -594,7 +612,7 @@ Una redacción propuesta:
 
 Es la adición más importante. Responde directamente al objetivo temporal, usa la parcela como unidad repetida, separa M1–M5 de M0–M5 y hace visible la diferencia transitoria de dosis de M5. También incluye observaciones individuales, medias marginales e incertidumbre, en lugar de depender solo de p-valores.
 
-Mi única discrepancia con el encuadre del cuaderno es la frase “complementa; no sustituye”. Para la tesis revisada, el modelo longitudinal debería **sustituir como análisis inferencial principal** a la colección de ANOVA independientes para biomasa/N, aunque estos últimos sigan como descomposición por fecha y control de reproducibilidad.
+El encuadre actual ya ubica el modelo longitudinal como análisis inferencial principal para las variables repetidas y deja los ANOVA por fecha como descomposición y control de reproducibilidad. Esa jerarquía es la apropiada y debe trasladarse a la tesis.
 
 ### 7.2 Qué resultados deberían pasar al cuerpo
 
@@ -603,19 +621,24 @@ Pasar al cuerpo:
 - interacción calendario × fecha para biomasa y concentración de N;
 - medias marginales y datos observados;
 - sensibilidad M1–M4 en septiembre;
-- una frase breve sobre N aéreo/INN, con gráficos detallados en anexo.
+- una frase breve sobre N presente en biomasa/INN, con gráficos detallados en anexo.
 
 No hace falta llevar cada LRT, cada variable derivada y cada diagnóstico al cuerpo. La tesis puede concentrarse en las variables primitivas y usar las derivadas como apoyo.
 
-### 7.3 Correcciones necesarias
+### 7.3 Implementación actual y límites
 
-1. **Corregir la fórmula de imputación** y la aserción que espera 2,485788.
-2. El comando de reproducción menciona `festuca_thesis_replication_longitudinal.ipynb`, pero el archivo incluido se llama `festuca_estudio_longitudinal.ipynb`.
-3. El optimizador debería seleccionar el mejor ajuste convergido, no el primer ajuste finito. En los resultados actuales todos parecen converger, así que no cambia las conclusiones, pero sí la robustez del código.
-4. Evaluar log-transformación o varianza por fecha para biomasa.
-5. Para inferencia final, preferir *bootstrap* paramétrico o corrección de grados de libertad sobre LRT puramente asintótico.
-6. Cambiar el título “crecimiento y captura de N” por “biomasa aérea y N presente en biomasa”.
-7. No mostrar cuatro paneles con demasiados p-valores en una sola figura principal. La versión de tesis debería ser más simple.
+La implementación actual incluye:
+
+1. La fórmula y la aserción de imputación esperan 2,868848 % N; el faltante no se rellena en el análisis principal.
+2. Los comandos y el `README.md` usan los nombres reales de los notebooks y también ofrecen puntos de entrada de terminal.
+3. El ajuste mixto prueba todos los optimizadores configurados y selecciona el mejor convergido por log-verosimilitud.
+4. Biomasa se evalúa en escala original y logarítmica, y se informa la heterogeneidad residual por fecha.
+5. Las interacciones primitivas M1–M5 usan *bootstrap* paramétrico y FDR; los LRT asintóticos de variables derivadas se rotulan como apoyo.
+6. Las salidas usan “biomasa aérea” y “N presente en biomasa”, evitando presentar stocks instantáneos como captura acumulada.
+7. Las figuras principales de biomasa y concentración de N tienen dos paneles cada una; N presente en biomasa e INN quedaron en una figura de anexo.
+8. La sensibilidad de los registros 150/152, la jerarquía inferencial y el carácter descriptivo de EAN/PAA se exportan a CSV.
+
+No debe confundirse “código corregido” con “incertidumbre metodológica eliminada”. Siguen siendo pertinentes la sensibilidad de escala de biomasa, la varianza aleatoria en el límite, el número modesto de réplicas de *bootstrap* y la verificación documental de los registros 150/152.
 
 ### 7.4 Contrastes dirigidos
 
@@ -624,7 +647,7 @@ Los contrastes bayesianos agregados son útiles como síntesis:
 - septiembre, biomasa M1–M2 frente a M3–M4: evidencia fuerte en secano y moderada en riego;
 - octubre, N% M4–M5 frente a M1–M2: evidencia muy fuerte en riego y sugerente en secano.
 
-Deben llamarse “contrastes dirigidos por hipótesis” salvo que exista documentación de que fueron definidos antes de ver los datos. “Preespecificados” sería demasiado fuerte si nacieron durante el reanálisis.
+El cuaderno actual los llama “contrastes dirigidos por hipótesis”. Debe mantenerse esa denominación salvo que exista documentación de que fueron definidos antes de ver los datos; “preespecificados” sería demasiado fuerte si nacieron durante el reanálisis.
 
 ---
 
@@ -655,34 +678,35 @@ En un anexo compacto conservaría:
 
 - Modelo B: dejar como análisis exploratorio técnico o eliminar de la tesis, salvo que se verifiquen los datos de materia seca y se justifiquen errores de medición y curva crítica.
 - Modelos C y D: correcto excluirlos; no hace falta narrar mucho su historia en una tesis agronómica.
-- Detalles de implementación del muestreador: pueden ir en repositorio, no en el texto, pero la especificación del modelo y priors sí debe estar completa.
+- Detalles de implementación del muestreador: están correctamente relegados al repositorio; la tesis o el anexo deben conservar la especificación matemática y la tabla numérica de priors que ahora exporta el código.
 - Figuras probabilísticas redundantes: elegir pocas y orientadas a una decisión.
 
-### 8.4 Problema de reproducibilidad actual
+### 8.4 Alcance actual de la reproducibilidad
 
-El ZIP no contiene `festuca_probabilistic_outputs/` ni `results/`, pese a que el código y el cuaderno declaran importar cadenas y tablas desde esas rutas. `code/festuca_annex_v2_analysis.py` recalcula el modelo corregido de rendimiento, pero los modelos longitudinales, B y el nulo de reconstrucción dependen de resultados externos no incluidos.
+El repositorio contiene `reference_outputs/legacy_probabilistic_run/` con los seis resúmenes mínimos de la corrida histórica, sus SHA-256 y una explicación de procedencia. `uv run --frozen festuca-annex` recalcula el modelo A corregido de rendimiento y regenera todas las tablas y figuras del anexo; los resultados se escriben en `results/`.
 
-Por tanto, el anexo actual **no es reproducible de extremo a extremo** a partir del paquete entregado. Las salidas embebidas en el notebook prueban que alguna corrida existió, pero no permiten auditar cómo se generaron todos los números.
+La reproducibilidad tiene, sin embargo, dos niveles distintos:
 
-Hay dos soluciones aceptables:
+- **Reproducción de los artefactos finales:** está cerrada. El comando único reconstruye tablas y figuras usando el Excel, el código actual y los resúmenes congelados versionados.
+- **Remuestreo completo desde datos primitivos:** está cerrado para el modelo A corregido de rendimiento, pero no para el modelo A longitudinal, el modelo B y el nulo de reconstrucción. Esos tres componentes consumen resúmenes aceptados de la corrida histórica porque no se conservaron sus cadenas completas.
 
-- incluir todo el generador y un comando único que produzca tablas, figuras y cadenas desde el Excel; o
-- incluir artefactos de posterior versionados, con hashes/checksums, metadatos de software/semilla y código exacto que los consumió.
-
-La primera es preferible.
+Esta solución es auditable, pero no debe describirse como remuestreo integral. Si el tribunal o el repositorio institucional exigen regenerar cada cadena desde el Excel, habrá que recuperar las cadenas/generadores originales o reimplementar esos tres componentes y documentar el cambio de versión inferencial.
 
 ### 8.5 Priors y validación del muestreador
 
-El anexo describe la regularización cualitativamente, pero debería incluir una tabla numérica completa de priors y análisis predictivo previo. En particular, el modelo de rendimiento usa resultados estandarizados y varias escalas de regularización; esa transformación y cada prior deben poder reconstruirse sin leer el código.
+El anexo actual exporta una tabla completa de priors y un chequeo predictivo previo con 20 000 simulaciones por sector y escala de regularización. La especificación usa verosimilitud Student-t con 5 grados de libertad, priors explícitos para intercepto, N adicional, bloque, escala de los contrastes temporales y varianza residual, todo documentado en la escala estandarizada y en kg ha⁻¹ tras desestandarizar.
 
-Si se mantiene un muestreador Gibbs personalizado, R-hat y ESS solo indican mezcla de las cadenas, no que el algoritmo apunte a la distribución correcta. Debería añadirse al repositorio:
+El muestreador personalizado fue contrastado con una implementación independiente en PyMC:
 
-- prueba contra una implementación de referencia en Stan/PyMC/brms en un subconjunto;
-- simulación-recuperación de parámetros;
-- idealmente *simulation-based calibration*;
-- tests unitarios de parametrización y transformación a kg ha⁻¹.
+- diferencia máxima entre medias posteriores de tratamiento: 4,31 kg ha⁻¹;
+- cero divergencias en las corridas de referencia;
+- R-hat máximo: 1,006;
+- ESS *bulk* mínimo: 1416;
+- cobertura de los intervalos del 95 % en simulación-recuperación: 6 de 6 medias verdaderas.
 
-También conviene escribir ESS como “1 704” o “1704”; “1.704” en español puede leerse como uno coma siete.
+Además, las pruebas unitarias cubren la parametrización del diseño, la densidad de la escala jerárquica, la selección de optimizador, el LRT y el ajuste de multiplicidad. R-hat y ESS quedan así complementados por validación contra una referencia independiente y por recuperación sobre datos simulados. Una calibración basada en muchas simulaciones (*simulation-based calibration*) seguiría siendo una mejora posible, no un requisito pendiente para sostener los resultados actuales.
+
+En el texto en español conviene escribir ESS como “1416” o “1 416”; “1.416” puede leerse como uno coma cuatrocientos dieciséis.
 
 ### 8.6 Interpretación del rango posterior
 
@@ -698,34 +722,25 @@ La ausencia actual de figuras es una debilidad importante. No hace falta convert
 
 ### Figura 1. Cronograma experimental y N acumulado
 
-La figura existente `cell_011_out_1.png` contiene la información correcta, pero está demasiado cargada para el cuerpo principal. Debería simplificarse:
-
-- mostrar M0–M5 en filas y las dos aplicaciones como puntos/segmentos;
-- añadir aplicaciones comunes y muestreos como líneas verticales discretas;
-- indicar N total común y total final;
-- resaltar que M5 tenía 100 kg N ha⁻¹ experimentales el 16 de septiembre;
-- no mezclar demasiados colores, etiquetas y sombras mensuales;
-- usar las fechas ejecutadas verificadas.
-
-Esta figura es científicamente esencial porque revela de inmediato qué significa cada “calendario”.
+El análisis genera `figura_01_cronograma_y_n_acumulado` en PNG y PDF. Presenta M0–M5, aplicaciones experimentales y comunes, muestreos y N acumulado, y resalta que M5 tenía 100 kg N ha⁻¹ experimentales el 16 de septiembre. Es científicamente esencial porque revela de inmediato qué significa cada “calendario”. Antes de insertarla en la tesis solo debe verificarse que todas las fechas coincidan con la bitácora autoritativa.
 
 ### Figura 2. Rendimiento: dos preguntas y dos escalas
 
-`cell_027_out_0.png` es probablemente la mejor figura lista para el cuerpo. Separa visualmente:
+`figura_03_rendimiento_dos_preguntas` está lista en PNG y PDF y separa visualmente:
 
 - la gran respuesta M0 vs fertilizados;
 - la incertidumbre y solapamiento entre M1–M5.
 
-Mantendría puntos individuales y medias ajustadas con IC. Reduciría texto incrustado, usaría una paleta accesible en escala de grises y aclararía en el pie que los IC son puntuales y n = 4.
+La figura muestra puntos individuales y medias ajustadas con IC. El pie de la tesis debe aclarar que los IC son puntuales y que n = 4 por tratamiento.
 
 ### Figuras 3 y 4. Trayectorias primitivas
 
-El cuerpo debería mostrar:
+El análisis ya genera las dos figuras destinadas al cuerpo:
 
 - **Figura 3:** biomasa aérea en pie por fecha, sector y calendario;
 - **Figura 4:** concentración de N en biomasa por fecha, sector y calendario.
 
-Estas dos variables son más primitivas e interpretables que N aéreo e INN. Se pueden usar dos paneles por figura, uno por sector, con:
+Estas dos variables son más primitivas e interpretables que N presente en biomasa e INN. `figura_04_trayectorias_biomasa_aerea` y `figura_05_trayectorias_concentracion_n` usan dos paneles, uno por sector, con:
 
 - puntos de parcela discretos;
 - líneas de medias marginales;
@@ -733,7 +748,7 @@ Estas dos variables son más primitivas e interpretables que N aéreo e INN. Se 
 - p de interacción en el pie, no dentro de cada panel;
 - nota sobre M5 en septiembre.
 
-N aéreo e INN pueden ir juntos en una figura del anexo. La figura actual de cuatro paneles es útil para auditoría, pero demasiado densa para lectura narrativa.
+N presente en biomasa e INN están juntos en `anexo_trayectorias_n_biomasa_e_inn`, fuera de las figuras principales.
 
 ### Figura opcional 5. Componentes finales
 
@@ -859,13 +874,13 @@ No se puede. Acción: usar tratamiento × fecha y contrastes de cambio.
 Inconsistencia que debe corregirse.
 
 **“¿Cómo controlaron el gran número de pruebas?”**  
-La versión actual no presenta una jerarquía suficiente. Acción: primario/secundario/exploratorio y FDR o cautela explícita.
+El análisis reproducible define resultados primarios, secundarios, de apoyo y exploratorios, y aplica FDR por familias. Acción: incorporar explícitamente esa misma jerarquía en la tesis.
 
 **“¿Por qué p > 0,05 implica que los calendarios son agronómicamente iguales?”**  
 No lo implica. Acción: no afirmar igualdad; presentar intervalos/margen.
 
 **“¿Por qué imputaron con esa fórmula?”**  
-La fórmula actual es incorrecta. Acción: corregir y mantener el faltante como análisis principal.
+La fórmula que permanece en `tesis.md` es incorrecta. El código usa la fórmula correcta y mantiene el faltante en el análisis principal. Acción: corregir el texto de la tesis.
 
 ### 11.5 Sobre mecanismos
 
@@ -884,10 +899,10 @@ Prácticamente ninguna dentro de sector; son transformaciones del rendimiento.
 ### 11.6 Sobre el anexo probabilístico
 
 **“¿Puedo regenerar todos los resultados desde el Excel con un comando?”**  
-No con el ZIP actual. Acción: cerrar reproducibilidad.
+`uv run --frozen festuca-annex` regenera todas las tablas y figuras. El modelo A de rendimiento se remuestrea desde los datos; el modelo A longitudinal, el modelo B y el nulo de reconstrucción se reconstruyen desde seis resúmenes históricos con checksums. La respuesta correcta debe distinguir regeneración de artefactos de remuestreo integral.
 
 **“¿Cómo validaron el Gibbs personalizado?”**  
-R-hat/ESS no bastan. Acción: comparación con implementación de referencia y simulación-recuperación.
+Se comparó con una implementación independiente en PyMC y con simulación-recuperación: diferencia máxima de 4,31 kg ha⁻¹ en medias de tratamiento, cero divergencias, R-hat máximo 1,006, ESS *bulk* mínimo 1416 y cobertura 6/6. Las pruebas unitarias verifican además parametrización y transformaciones clave.
 
 **“¿Por qué 100 kg ha⁻¹ es el margen relevante?”**  
 Es provisional. Acción: justificar económicamente o mostrar una curva de márgenes sin privilegiarlo.
@@ -900,14 +915,14 @@ Es provisional. Acción: justificar económicamente o mostrar una curva de márg
 
 1. Confirmar fechas ejecutadas, pastoreo/exclusión, orden del 12 de junio y fecha general de agosto.
 2. Verificar registros de materia seca 150 y 152.
-3. Corregir fórmula de imputación y volver a generar todas las sensibilidades.
+3. Corregir en `tesis.md` la fórmula y el valor de imputación; las sensibilidades reproducibles ya usan el cálculo correcto.
 4. Confirmar dosis/unidades y cuantificar N común/total.
 5. Corregir archivos de procedencia y nombres conflictivos.
 
 ### Fase 2: rehacer la columna vertebral inferencial
 
-1. Incorporar modelo longitudinal M1–M5 por sector.
-2. Definir jerarquía de resultados.
+1. Incorporar en la tesis los resultados del modelo longitudinal M1–M5 por sector ya implementado.
+2. Adoptar la jerarquía inferencial y el control FDR documentados por el análisis.
 3. Presentar rendimiento como dos preguntas: M0 vs fertilizados y M1–M5.
 4. Retirar inferencias de compensación y correlaciones mecanísticas acopladas.
 5. Reformular no significancia como falta de identificación, no equivalencia.
@@ -922,12 +937,12 @@ Es provisional. Acción: justificar económicamente o mostrar una curva de márg
 
 ### Fase 4: figuras y anexos
 
-1. Cronograma simplificado.
-2. Rendimiento en dos escalas.
-3. Biomasa longitudinal.
-4. Concentración de N longitudinal.
-5. Anexo clásico con tablas completas y diagnósticos.
-6. Anexo probabilístico compacto y reproducible.
+1. Insertar el cronograma generado y verificar sus fechas contra la bitácora.
+2. Insertar la figura generada de rendimiento en dos escalas.
+3. Insertar la figura generada de biomasa longitudinal.
+4. Insertar la figura generada de concentración de N longitudinal.
+5. Seleccionar del análisis reproducible las tablas y diagnósticos que irán al anexo clásico.
+6. Mantener compacto el anexo probabilístico y declarar el uso de resúmenes históricos congelados.
 
 ### Fase 5: auditoría final
 
@@ -950,6 +965,6 @@ La tesis tiene un experimento útil y una historia científica defendible, pero 
 - **no** se demostró compensación biológica entre componentes;
 - **no** se estimó causalmente el efecto del riego.
 
-El análisis longitudinal de Agustín mejora de manera directa la adecuación entre objetivo y método, y debería incorporarse al núcleo. El anexo probabilístico añade valor si se reduce a preguntas distintas, se corrige su reproducibilidad y se evita que una capa estadística sofisticada oculte limitaciones básicas del diseño.
+El análisis longitudinal de Agustín mejora de manera directa la adecuación entre objetivo y método y debería incorporarse al núcleo. El anexo probabilístico ya puede regenerar sus tablas y figuras, documenta sus priors y valida el muestreador; debe mantenerse centrado en preguntas distintas y declarar que tres componentes históricos se reconstruyen desde resúmenes congelados, no mediante remuestreo integral.
 
 Con las correcciones P0 y P1, tres o cuatro figuras y una reescritura que distinga resultado, inferencia e hipótesis, la tesis puede quedar no solo defendible, sino bastante más fuerte que la versión típica basada en una secuencia de ANOVA y letras de Tukey. Sin esas correcciones, un tribunal atento puede desmontar la narrativa de convergencia/compensación con dos objeciones algebraicas y una pregunta sobre la cronología de campo.

@@ -1,0 +1,3 @@
+sector,date,nni_margin,median_largest_difference,lower_95_largest_difference,upper_95_largest_difference,p_largest_difference_gt_margin,p_all_schedules_within_margin,median_fertilized_minus_m0,p_fertilized_mean_gt_m0,diagnostics_ready
+Secano,Nov,0.1,0.157660413312821,0.0797981677673034,0.2501499663416197,0.918625,0.081375,0.2856941233825614,1.0,True
+Riego,Nov,0.1,0.2391011502146581,0.1562759284126905,0.3344141071291016,0.9995,0.0005,0.2695436888806781,1.0,True

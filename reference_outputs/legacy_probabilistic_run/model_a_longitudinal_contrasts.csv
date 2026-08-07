@@ -1,0 +1,13 @@
+sector,variable,date,contrast,direction,median,lower_95,upper_95,probability_direction
+Secano,Biomasa aérea,Sep,Tempranos M1–M2 menos intermedios M3–M4,Mayor en tempranos,2081.5438987927737,534.7507940949903,3686.1923897574598,0.997125
+Secano,Biomasa aérea,Oct,Tempranos M1–M2 menos tardíos M4–M5,Mayor en tempranos,1130.4147927405293,-1075.9706226444841,3278.8613560363674,0.8525
+Secano,Biomasa aérea,Nov,Tempranos M1–M2 menos tardíos M4–M5,Mayor en tempranos,1785.3752847450914,-674.7881915767547,3991.8907379547536,0.924
+Secano,Concentración de N,Sep,Tardíos M4–M5 menos tempranos M1–M2,Mayor en tardíos,-0.09299176877154236,-0.3149540644323904,0.08185153772263205,0.15625
+Secano,Concentración de N,Oct,Tardíos M4–M5 menos tempranos M1–M2,Mayor en tardíos,0.14184743521937127,-0.012058803452673406,0.327659316573482,0.949
+Secano,Concentración de N,Nov,Tardíos M4–M5 menos tempranos M1–M2,Mayor en tardíos,0.053001334229538566,-0.04409733766698423,0.18394642566247169,0.835
+Riego,Biomasa aérea,Sep,Tempranos M1–M2 menos intermedios M3–M4,Mayor en tempranos,771.1051979899589,-80.10241647892451,1862.235977019973,0.930875
+Riego,Biomasa aérea,Oct,Tempranos M1–M2 menos tardíos M4–M5,Mayor en tempranos,1016.8077435496871,-318.86673691665385,2840.743248368514,0.88775
+Riego,Biomasa aérea,Nov,Tempranos M1–M2 menos tardíos M4–M5,Mayor en tempranos,836.4037683513388,-520.3478537048197,2776.418467158716,0.843
+Riego,Concentración de N,Sep,Tardíos M4–M5 menos tempranos M1–M2,Mayor en tardíos,-0.3465201423462909,-0.6256620527739524,-0.08846561728189599,0.0055
+Riego,Concentración de N,Oct,Tardíos M4–M5 menos tempranos M1–M2,Mayor en tardíos,0.31834413519430793,0.1296651024149101,0.5066532069706013,0.999
+Riego,Concentración de N,Nov,Tardíos M4–M5 menos tempranos M1–M2,Mayor en tardíos,0.12476779229694879,-0.008334229998820823,0.2619814299157782,0.966375

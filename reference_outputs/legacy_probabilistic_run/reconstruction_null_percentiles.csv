@@ -1,0 +1,4 @@
+pattern,statistic,observed_correlation,null_median,null_lower_95,null_upper_95,null_percentile,p_null_as_or_more_inverse,posterior_predictive_draws,diagnostics_ready
+"Parcelas M1–M5, ambos sectores",pooled_plot_correlation_m1_m5,-0.6692569129729553,-0.6679139581156639,-0.8213913111174956,-0.3947619814027402,49.7,0.497,2000.0,True
+"Medias M1–M5, Secano",Secano_treatment_mean_correlation_m1_m5,-0.8146472327191301,-0.8088408150352137,-0.9842926777716832,0.2157500155925627,48.85,0.4885,2000.0,True
+"Medias M1–M5, Riego",Riego_treatment_mean_correlation_m1_m5,-0.8177115401093613,-0.8095103798228855,-0.9880267521510429,0.1780243750817606,48.5,0.485,2000.0,True
