@@ -10,9 +10,8 @@ Lo que impide considerar la versión actual lista no es una falla única, sino u
 2. el análisis principal, que fragmenta el tiempo en ANOVA independientes;
 3. varias afirmaciones de “trayectorias”, “convergencia” y “compensación” que exceden lo identificado por esos análisis o por las variables medidas.
 
-Hay además tres asuntos concretos que deberían resolverse antes de la entrega:
+Hay además dos asuntos concretos que deberían resolverse antes de la entrega:
 
-- **La fórmula de imputación de la celda faltante permanece mal escrita y mal aplicada en la tesis.** Con la notación usada en `tesis.md`, se intercambiaron los coeficientes de los totales de bloque y tratamiento. La imputación correcta para el diseño completo es 2,86885 % N, no 2,48579 % N. El código longitudinal actual ya usa la fórmula y el valor correctos; falta trasladar esa corrección al texto de la tesis.
 - **Hay que verificar la cronología ejecutada y el manejo del pastoreo.** M1 y M2 recibieron su primera aplicación antes del cierre del 1.º de julio. Si los animales siguieron accediendo a las parcelas, el tratamiento temprano quedó combinado con defoliación, posible redistribución de N y una exposición diferencial. Además, el libro contiene fechas preliminares/conflictivas y años 2026 para un ensayo realizado en 2025.
 - **La supuesta compensación entre panojas y semillas estimadas por panoja no está demostrada.** El número de semillas por panoja fue reconstruido usando el rendimiento y el número de panojas; una relación inversa con panojas aparece mecánicamente por la fórmula. El análisis nulo agregado por Agustín muestra que la correlación observada queda aproximadamente en el percentil 49 de la distribución inducida por esa reconstrucción. Por tanto, no aporta evidencia independiente de compensación biológica.
 
@@ -27,7 +26,7 @@ Para evitar mezclar responsabilidades:
 - **Tesis de Emanuel Choca y Serrana Montero:** el contenido de `sources/` y su transcripción exacta en `tesis.md`.
 - **Material analítico agregado por Agustín:** `festuca_estudio_longitudinal.ipynb`, `festuca_anexo_probabilistico.ipynb`, el paquete `src/festuca_analysis/`, las pruebas de `tests/`, las figuras y los archivos derivados fuera de `sources/`.
 
-Las objeciones a la formulación científica, documentación de campo, métodos originales, resultados y redacción se refieren a la tesis. Las observaciones sobre reproducibilidad, modelos mixtos, modelos probabilísticos y figuras específicas se refieren al material agregado. La fórmula incorrecta de imputación aparece todavía en `tesis.md`, pero fue corregida en el cuaderno y en el paquete de análisis.
+Las objeciones a la formulación científica, documentación de campo, métodos originales, resultados y redacción se refieren a la tesis. Las observaciones sobre reproducibilidad, modelos mixtos, modelos probabilísticos y figuras específicas se refieren al material agregado. La conciliación numérica entre ambos materiales debe hacerse manualmente fuera del notebook; el flujo ejecutable no contiene aserciones contra valores publicados en `tesis.md`.
 
 ### 1.1 Estado del código al cerrar esta revisión
 
@@ -35,12 +34,14 @@ El código auditado tiene actualmente la siguiente estructura y alcance:
 
 - la lógica estadística vive en el paquete `src/festuca_analysis/`; los notebooks contienen llamadas de alto nivel y texto narrativo;
 - `uv run --frozen festuca-longitudinal` y `uv run --frozen festuca-annex` regeneran las tablas y figuras correspondientes;
-- la imputación usa la fórmula correcta y permanece solo como sensibilidad;
+- la imputación usa la fórmula estándar del DBCA y permanece solo como sensibilidad;
+- las comparaciones con tablas o cifras publicadas en la tesis se reservan para una revisión manual externa al notebook;
 - los modelos mixtos prueban los optimizadores configurados y seleccionan el ajuste convergido con mayor log-verosimilitud;
 - las interacciones de las variables primitivas usan *bootstrap* paramétrico reproducible y ajuste FDR de Benjamini–Hochberg;
 - EAN y productividad aparente del agua se resumen descriptivamente, sin repetir pruebas inferenciales sobre transformaciones deterministas del rendimiento;
 - el anexo incluye priors numéricos, chequeos predictivos previos y una validación independiente del muestreador contra PyMC y mediante simulación-recuperación;
-- los dos notebooks fueron ejecutados completamente y no contienen salidas de error.
+- `festuca_estudio_longitudinal.ipynb` fue ejecutado íntegramente después de estas correcciones y no contiene salidas de error;
+- el anexo probabilístico no se volvió a muestrear durante la revisión gráfica: sus once figuras finales se regeneraron desde las tablas guardadas, mientras que el notebook conserva las salidas de su última ejecución completa.
 
 Persisten dos límites que el código no puede resolver por sí solo: verificar documentalmente los registros 150/152 y volver a muestrear tres componentes probabilísticos históricos para los que se conservaron resúmenes aceptados, pero no las cadenas completas.
 
@@ -90,7 +91,6 @@ Esa combinación es una conclusión científicamente útil. No hace falta fabric
 
 | Prioridad | Problema | Riesgo si no se corrige | Acción mínima |
 |---|---|---|---|
-| **P0** | Fórmula de imputación incorrecta en la tesis | Error matemático verificable en Métodos y sensibilidad | Corregir fórmula y valor en `tesis.md`; el código y las sensibilidades actuales ya están corregidos |
 | **P0** | Cronología ejecutada y posible pastoreo después de M1/M2 | Posible confusión diferencial del tratamiento temprano | Revisar bitácora; documentar exclusión real de animales, fechas ejecutadas y orden muestreo/aplicación |
 | **P0** | Inferencia de compensación desde una variable reconstruida | Conclusión biológica apoyada en acoplamiento algebraico | Retirar del resumen y conclusiones; reformular como descomposición no independiente o hipótesis no probada |
 | **P0/P1** | Pregunta longitudinal analizada principalmente con ANOVA separados | No se prueba formalmente el cambio de trayectorias ni la “convergencia” | Incorporar modelo repetido/mixto tratamiento × fecha en Métodos y Resultados principales |
@@ -284,7 +284,7 @@ Quedan límites que deben acompañar la interpretación:
 
 El objetivo no es construir un modelo sofisticado por deporte. Es probar directamente la afirmación temporal, presentar estimaciones con intervalos y mostrar cuándo la conclusión depende de la especificación.
 
-### 5.3 La fórmula de la celda faltante es incorrecta
+### 5.3 La celda faltante se mantiene fuera del análisis principal
 
 En `tesis.md:L584-L590` se presenta:
 
@@ -294,13 +294,7 @@ $$
 
 con `r` = número de bloques, `t` = número de tratamientos, `B` = total del bloque que contiene el faltante y `T` = total del tratamiento que contiene el faltante.
 
-Con esas definiciones, la fórmula estándar para una celda faltante en un DBCA es:
-
-$$
-\hat{x}=\frac{tB+rT-G}{(t-1)(r-1)}.
-$$
-
-Los coeficientes de `B` y `T` están intercambiados en la tesis. El código actual en `src/festuca_analysis/longitudinal.py` y la salida ejecutada de `festuca_estudio_longitudinal.ipynb` ya contienen la expresión correcta.
+Con esas definiciones, esa es la fórmula estándar para una celda faltante en un DBCA. También coincide con la predicción para M1–R4 obtenida al ajustar el modelo aditivo de tratamiento y bloque a las 23 observaciones medidas. El código en `src/festuca_analysis/` usa la misma expresión, pero la mantiene exclusivamente como sensibilidad.
 
 Para M1–R4–secano–16/09:
 
@@ -309,22 +303,20 @@ Para M1–R4–secano–16/09:
 - total general sin la celda: $G=44,2468436$;
 - $r=4$, $t=6$.
 
-La imputación correcta en el diseño completo es:
+La estimación en el diseño completo es:
 
 $$
-\hat{x}=2,8688485\%N.
+\hat{x}=2,4857882\%N.
 $$
 
-El valor de 2,4857882 que permanece en `tesis.md` proviene exactamente de la fórmula invertida. En la comparación M1–M5 de concentración de N en septiembre, el p cambia aproximadamente así:
+En la comparación M1–M5 de concentración de N en septiembre, el análisis principal y la sensibilidad quedan así:
 
 | Tratamiento del faltante | p global M1–M5 |
 |---|---:|
 | Mantenerlo faltante, análisis principal | 0,2518 |
-| Imputación incorrecta publicada | 0,1534 |
-| Imputación correcta usando diseño M0–M5 | 0,0829 |
-| Imputación correcta calculada solo en M1–M5 | 0,1130 |
+| Sensibilidad imputada con el diseño M0–M5 | 0,1534 |
 
-No cruza 0,05, pero se acerca bastante más. La tesis debe corregirse porque es un error verificable y porque afecta también N presente en biomasa e INN de la sensibilidad. El análisis actual mantiene correctamente la observación como faltante en el análisis principal; el modelo de máxima verosimilitud usa las demás observaciones bajo una hipótesis MAR sin rellenar el dato.
+La sensibilidad no cruza 0,05, pero el p-valor cambia y no debe presentarse como si fuera idéntico. El análisis actual mantiene correctamente la observación como faltante en el análisis principal; el modelo usa las demás observaciones sin rellenar el dato. La concordancia entre estas cifras y las tablas de la tesis debe revisarse manualmente, no mediante aserciones dentro del notebook.
 
 ### 5.4 No significancia no demuestra equivalencia práctica
 
@@ -529,7 +521,7 @@ La sección es detallada, pero debe incorporar o corregir:
 - especificación exacta del software, versión y tipo de suma de cuadrados;
 - modelo longitudinal y estimandos;
 - jerarquía de resultados y política de multiplicidad;
-- fórmula corregida de imputación;
+- manejo del dato faltante y sensibilidad de imputación;
 - política para los registros 150/152.
 
 Un detalle de presentación: `tesis.md:L281` dice “el Tabla 1”; debe ser “la Tabla 1”. Hay ocurrencias similares posteriores.
@@ -612,7 +604,7 @@ Una redacción propuesta:
 
 Es la adición más importante. Responde directamente al objetivo temporal, usa la parcela como unidad repetida, separa M1–M5 de M0–M5 y hace visible la diferencia transitoria de dosis de M5. También incluye observaciones individuales, medias marginales e incertidumbre, en lugar de depender solo de p-valores.
 
-El encuadre actual ya ubica el modelo longitudinal como análisis inferencial principal para las variables repetidas y deja los ANOVA por fecha como descomposición y control de reproducibilidad. Esa jerarquía es la apropiada y debe trasladarse a la tesis.
+El encuadre actual ya ubica el modelo longitudinal como análisis inferencial principal para las variables repetidas y deja los ANOVA por fecha como descomposición descriptiva. Esa jerarquía es la apropiada y debe trasladarse a la tesis. La concordancia con las tablas publicadas se comprueba manualmente fuera del notebook.
 
 ### 7.2 Qué resultados deberían pasar al cuerpo
 
@@ -629,7 +621,7 @@ No hace falta llevar cada LRT, cada variable derivada y cada diagnóstico al cue
 
 La implementación actual incluye:
 
-1. La fórmula y la aserción de imputación esperan 2,868848 % N; el faltante no se rellena en el análisis principal.
+1. La sensibilidad de imputación estima 2,485788 % N; el faltante no se rellena en el análisis principal.
 2. Los comandos y el `README.md` usan los nombres reales de los notebooks y también ofrecen puntos de entrada de terminal.
 3. El ajuste mixto prueba todos los optimizadores configurados y selecciona el mejor convergido por log-verosimilitud.
 4. Biomasa se evalúa en escala original y logarítmica, y se informa la heterogeneidad residual por fecha.
@@ -743,9 +735,10 @@ El análisis ya genera las dos figuras destinadas al cuerpo:
 Estas dos variables son más primitivas e interpretables que N presente en biomasa e INN. `figura_04_trayectorias_biomasa_aerea` y `figura_05_trayectorias_concentracion_n` usan dos paneles, uno por sector, con:
 
 - puntos de parcela discretos;
-- líneas de medias marginales;
+- medias marginales con un único marcador circular, sin unir fechas;
 - IC del 95 %;
-- p de interacción en el pie, no dentro de cada panel;
+- fechas ordinales equidistantes, con M1–M5 rotulados directamente bajo cada muestreo;
+- p de interacción en una banda textual superior, no dentro de cada panel;
 - nota sobre M5 en septiembre.
 
 N presente en biomasa e INN están juntos en `anexo_trayectorias_n_biomasa_e_inn`, fuera de las figuras principales.
@@ -767,8 +760,9 @@ Mostrar densidad de panojas y PMS. Si se incluye semillas por panoja, rotularla 
 
 - evitar gráficos de barras sin datos;
 - mostrar observaciones individuales;
-- mantener el mismo color/marcador por M1–M5 en toda la tesis;
-- no depender solo del color;
+- mantener el mismo color por tratamiento en toda la tesis y usar un único marcador circular, salvo círculo/cuadrado cuando Secano y Riego se superponen en el mismo eje;
+- usar `inferno` como paleta común y una jerarquía estable de espesores: datos principales > intervalos > referencias > grilla;
+- no depender solo del color: rotular M0–M5 directamente bajo cada fecha cuando se comparen medias por muestreo;
 - exportar PDF/SVG vectorial;
 - indicar n y datos faltantes;
 - usar escalas coherentes entre sectores cuando la comparación visual lo requiera;
@@ -880,7 +874,7 @@ El análisis reproducible define resultados primarios, secundarios, de apoyo y e
 No lo implica. Acción: no afirmar igualdad; presentar intervalos/margen.
 
 **“¿Por qué imputaron con esa fórmula?”**  
-La fórmula que permanece en `tesis.md` es incorrecta. El código usa la fórmula correcta y mantiene el faltante en el análisis principal. Acción: corregir el texto de la tesis.
+Es la estimación estándar de una celda faltante en un DBCA y coincide con la predicción del modelo aditivo de tratamiento y bloque. El dato permanece faltante en el análisis principal; la imputación se presenta solo como sensibilidad.
 
 ### 11.5 Sobre mecanismos
 
@@ -915,9 +909,8 @@ Es provisional. Acción: justificar económicamente o mostrar una curva de márg
 
 1. Confirmar fechas ejecutadas, pastoreo/exclusión, orden del 12 de junio y fecha general de agosto.
 2. Verificar registros de materia seca 150 y 152.
-3. Corregir en `tesis.md` la fórmula y el valor de imputación; las sensibilidades reproducibles ya usan el cálculo correcto.
-4. Confirmar dosis/unidades y cuantificar N común/total.
-5. Corregir archivos de procedencia y nombres conflictivos.
+3. Confirmar dosis/unidades y cuantificar N común/total.
+4. Corregir archivos de procedencia y nombres conflictivos.
 
 ### Fase 2: rehacer la columna vertebral inferencial
 

@@ -26,6 +26,14 @@ Las tablas y figuras se regeneran en carpetas ignoradas por Git:
   longitudinal;
 - `results/` para el anexo probabilístico.
 
+Las figuras registran automáticamente la copia de Libertinus incluida en el
+paquete, por lo que conservan la misma tipografía sin instalar fuentes en el
+sistema. La licencia OFL se conserva en `src/festuca_analysis/fonts/OFL.txt`.
+El tema compartido usa la paleta `inferno`, conserva un color estable por
+tratamiento y fija espesores distintos para datos, intervalos, referencias y
+grilla. Salvo el gráfico que superpone Secano y Riego en un mismo eje, todos los
+puntos usan el mismo marcador circular.
+
 ## Ejecución sin Jupyter
 
 Los mismos análisis pueden ejecutarse desde una terminal:

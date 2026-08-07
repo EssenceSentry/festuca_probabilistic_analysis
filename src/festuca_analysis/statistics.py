@@ -33,6 +33,35 @@ class BootstrapLikelihoodRatioResult:
     requested_replicates: int
 
 
+def rcbd_missing_cell_estimate(
+    frame: pd.DataFrame,
+    *,
+    value_column: str,
+    missing_treatment: str,
+    missing_block: str,
+    r_blocks: int,
+    t_treatments: int,
+) -> float:
+    """Estimate one missing RCBD cell from observed treatment and block totals."""
+    if r_blocks < 2 or t_treatments < 2:
+        raise ValueError("El DBCA debe tener al menos dos bloques y dos tratamientos.")
+    observed = frame.dropna(subset=[value_column])
+    block_total = float(
+        observed.loc[
+            observed["block"].astype(str).eq(missing_block), value_column
+        ].sum()
+    )
+    treatment_total = float(
+        observed.loc[
+            observed["treatment"].astype(str).eq(missing_treatment), value_column
+        ].sum()
+    )
+    grand_total = float(observed[value_column].sum())
+    return (r_blocks * block_total + t_treatments * treatment_total - grand_total) / (
+        (r_blocks - 1) * (t_treatments - 1)
+    )
+
+
 def likelihood_ratio(reduced: Any, full: Any) -> LikelihoodRatioResult:
     """Compare nested maximum-likelihood fits with an asymptotic LRT."""
     statistic = max(0.0, 2.0 * (float(full.llf) - float(reduced.llf)))

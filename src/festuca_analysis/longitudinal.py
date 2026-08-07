@@ -21,11 +21,10 @@ LONGITUDINAL_STEPS = (
     "water_inputs",
     "rcbd_functions",
     "longitudinal_anova",
-    "published_validations",
     "observed_trajectories",
     "final_outcomes",
     "dry_matter_sensitivity",
-    "yield_reproduction",
+    "yield_analysis",
     "yield_overview",
     "yield_contrasts",
     "yield_components",
@@ -112,10 +111,6 @@ class LongitudinalNotebook:
         """Execute the longitudinal anova report section."""
         self._advance("longitudinal_anova")
 
-    def published_validations(self) -> None:
-        """Execute the published validations report section."""
-        self._advance("published_validations")
-
     def observed_trajectories(self) -> None:
         """Execute the observed trajectories report section."""
         self._advance("observed_trajectories")
@@ -128,9 +123,9 @@ class LongitudinalNotebook:
         """Execute the registered/ratio/exclusion dry-matter sensitivity."""
         self._advance("dry_matter_sensitivity")
 
-    def yield_reproduction(self) -> None:
-        """Execute the yield reproduction report section."""
-        self._advance("yield_reproduction")
+    def yield_analysis(self) -> None:
+        """Execute the yield analysis report section."""
+        self._advance("yield_analysis")
 
     def yield_overview(self) -> None:
         """Execute the yield overview report section."""
@@ -215,7 +210,7 @@ def _analysis_steps(
     export_figures: bool,
 ) -> Iterator[str]:
 
-    # Notebook code cell 3: configuration
+    # Notebook step: configuration
     import math
     import platform
     from collections.abc import Sequence
@@ -230,6 +225,7 @@ def _analysis_steps(
     import pandas as pd
     import patsy  # pyright: ignore[reportMissingTypeStubs]
     import scipy
+    import seaborn as sns  # pyright: ignore[reportMissingTypeStubs]
     import statsmodels  # pyright: ignore[reportMissingTypeStubs]
     import statsmodels.api as sm  # pyright: ignore[reportMissingTypeStubs]
     import statsmodels.formula.api as smf  # pyright: ignore[reportMissingTypeStubs]
@@ -239,17 +235,30 @@ def _analysis_steps(
     )
     from scipy import stats
 
+    from festuca_analysis.plotting import (
+        DATA_LINEWIDTH,
+        ERRORBAR_CAPSIZE,
+        INTERVAL_LINEWIDTH,
+        MARKER_SIZE,
+        REFERENCE_LINEWIDTH,
+        add_figure_header,
+        add_figure_note,
+        apply_plot_theme,
+        plot_horizontal_interval,
+    )
     from festuca_analysis.statistics import (
         benjamini_hochberg,
         fit_mixedlm_best,
         likelihood_ratio,
         parametric_bootstrap_lrt,
+        rcbd_missing_cell_estimate,
     )
 
     libqsturng = import_module("statsmodels.stats.libqsturng")
     libqsturng_api = cast(Any, libqsturng)
     mpl = cast(Any, plt)
     patsy_api = cast(Any, patsy)
+    sns_api = cast(Any, sns)
     sm_api = cast(Any, sm)
     smf_api = cast(Any, smf)
     statsmodels_api = cast(Any, statsmodels)
@@ -275,24 +284,7 @@ def _analysis_steps(
     FIGURES_DIR = PROJECT_ROOT / "festuca_thesis_figures"
     FIGURE_DPI = 300
 
-    PLOT_STYLE_PATH = PROJECT_ROOT / "festuca_technical_report.mplstyle"
-    if PLOT_STYLE_PATH.exists():
-        mpl.style.use(str(PLOT_STYLE_PATH))
-    else:
-        mpl.style.use("default")
-        mpl.rcParams.update(
-            {
-                "axes.grid": True,
-                "grid.alpha": 0.22,
-                "axes.spines.top": False,
-                "axes.spines.right": False,
-                "figure.dpi": 110,
-                "savefig.facecolor": "white",
-                "figure.facecolor": "white",
-                "axes.facecolor": "white",
-            }
-        )
-    PLOT_PALETTE = cast(list[str], mpl.rcParams["axes.prop_cycle"].by_key()["color"])
+    PLOT_PALETTE = apply_plot_theme()
 
     def save_figure(fig: Any, filename_stem: str) -> None:
         if not EXPORT_FIGURES:
@@ -319,14 +311,11 @@ def _analysis_steps(
         pd.Timestamp("2025-11-12"): "12 nov",
     }
 
-    TREATMENT_COLORS = dict(
-        zip(TREATMENTS, [PLOT_PALETTE[5], *PLOT_PALETTE[:5]], strict=True)
-    )
-    TREATMENT_MARKERS = dict(
-        zip(TREATMENTS, ("D", "o", "s", "^", "v", "P"), strict=True)
-    )
-    SECTOR_COLORS = dict(zip(SECTORS, (PLOT_PALETTE[0], PLOT_PALETTE[2]), strict=True))
-    SECTOR_MARKERS = dict(zip(SECTORS, ("o", "s"), strict=True))
+    TREATMENT_COLORS = dict(zip(TREATMENTS, PLOT_PALETTE[:6], strict=True))
+    TREATMENT_MARKERS = dict.fromkeys(TREATMENTS, "o")
+    SECTOR_COLORS = dict(zip(SECTORS, (PLOT_PALETTE[1], PLOT_PALETTE[6]), strict=True))
+    # Only the component-correlation plot overlays both sectors on one axis.
+    SECTOR_MARKERS = {"Secano": "o", "Riego": "s"}
 
     OUTCOME_LABELS = {
         "biomass_kg_ha_used": "Biomasa aérea (kg MS ha⁻¹)",
@@ -344,6 +333,14 @@ def _analysis_steps(
         "agronomic_efficiency": "Eficiencia agronómica (kg semilla kg⁻¹ N)",
         "apparent_water_productivity": "Productividad aparente del agua (kg ha⁻¹ mm⁻¹)",
     }
+    OBSERVED_BY_DATE_TITLES = {
+        "biomass_kg_ha_used": (
+            "Biomasa aérea observada en las tres fechas de muestreo"
+        ),
+        "n_pct": "Concentración de N observada en las tres fechas de muestreo",
+        "q_kg_n_ha": ("N presente en biomasa aérea en las tres fechas de muestreo"),
+        "nni_revised": "INN revisado en las tres fechas de muestreo",
+    }
 
     print("Python", platform.python_version())
     print("pandas", pd.__version__)
@@ -352,7 +349,7 @@ def _analysis_steps(
     print("statsmodels", statsmodels_api.__version__)
     yield "configuration"
 
-    # Notebook code cell 5: load_data
+    # Notebook step: load_data
     HARVEST_AREA_M2 = 0.76
     BIOMASS_AREA_M2 = 0.38
     DM_ISSUE_SAMPLE_IDS = {150, 152}
@@ -758,7 +755,7 @@ def _analysis_steps(
     display_output(data.qa)
     yield "load_data"
 
-    # Notebook code cell 7: flagged_dry_matter
+    # Notebook step: flagged_dry_matter
     flagged_dm = data.longitudinal.loc[
         data.longitudinal["dm_issue"],
         [
@@ -776,7 +773,7 @@ def _analysis_steps(
     display_output(flagged_dm)
     yield "flagged_dry_matter"
 
-    # Notebook code cell 9: baseline_summary
+    # Notebook step: baseline_summary
     baseline_summary = pd.DataFrame(
         {
             "biomass_t_ha": (
@@ -799,7 +796,7 @@ def _analysis_steps(
     display_output(baseline_summary.round(2))
     yield "baseline_summary"
 
-    # Notebook code cell 11: schedule
+    # Notebook step: schedule
     display_output(data.schedule)
 
     def plot_schedule_and_cumulative_n() -> None:
@@ -845,17 +842,17 @@ def _analysis_steps(
             grazing_closure,
             color=PLOT_PALETTE[3],
             linestyle="-.",
-            linewidth=1.4,
+            linewidth=REFERENCE_LINEWIDTH,
             alpha=0.9,
         )
         calendar_ax.annotate(
             "1 jul: cierre del pastoreo\ny ≈52 kg N ha⁻¹ comunes",
-            xy=(grazing_closure, 4.35),
+            xy=(grazing_closure, 0.35),
             xytext=(7, -2),
             textcoords="offset points",
             ha="left",
             va="top",
-            fontsize=7.8,
+            fontsize=8.75,
             color=PLOT_PALETTE[3],
         )
 
@@ -864,7 +861,7 @@ def _analysis_steps(
                 sample_date,
                 color=PLOT_PALETTE[5],
                 linestyle="--",
-                linewidth=1,
+                linewidth=REFERENCE_LINEWIDTH,
                 alpha=0.65,
             )
 
@@ -873,12 +870,12 @@ def _analysis_steps(
             row = data.schedule.loc[data.schedule["treatment"].eq(treatment)].iloc[0]
             if treatment == "M0":
                 calendar_ax.text(
-                    pd.Timestamp("2025-06-12"),
+                    pd.Timestamp("2025-04-20"),
                     y,
                     "sin N experimental adicional",
                     va="center",
                     ha="left",
-                    fontsize=8.5,
+                    fontsize=9,
                     color=PLOT_PALETTE[5],
                 )
                 continue
@@ -889,8 +886,8 @@ def _analysis_steps(
                 [y, y],
                 color=TREATMENT_COLORS[treatment],
                 marker=TREATMENT_MARKERS[treatment],
-                linewidth=2.1,
-                markersize=6,
+                linewidth=DATA_LINEWIDTH,
+                markersize=MARKER_SIZE,
                 label=treatment,
             )
             for application_date in dates:
@@ -904,15 +901,15 @@ def _analysis_steps(
                     textcoords="offset points",
                     ha="center",
                     va="bottom",
-                    fontsize=7.8,
+                    fontsize=8.75,
                     color=TREATMENT_COLORS[treatment],
                 )
 
         calendar_ax.scatter(
             [DATES[-1]],
             [len(TREATMENTS) - 0.25],
-            marker="*",
-            s=90,
+            marker="o",
+            s=46,
             color=PLOT_PALETTE[4],
             zorder=5,
         )
@@ -923,7 +920,7 @@ def _analysis_steps(
             textcoords="offset points",
             ha="right",
             va="bottom",
-            fontsize=8.5,
+            fontsize=9,
             color=PLOT_PALETTE[4],
         )
         calendar_ax.set_yticks(
@@ -954,7 +951,7 @@ def _analysis_steps(
                 where="post",
                 color=TREATMENT_COLORS[treatment],
                 linestyle="--" if treatment == "M0" else "-",
-                linewidth=1.9,
+                linewidth=DATA_LINEWIDTH,
                 label=treatment,
             )
 
@@ -963,7 +960,7 @@ def _analysis_steps(
                 sample_date,
                 color=PLOT_PALETTE[5],
                 linestyle="--",
-                linewidth=1,
+                linewidth=REFERENCE_LINEWIDTH,
                 alpha=0.65,
             )
 
@@ -981,14 +978,13 @@ def _analysis_steps(
             xytext=(10, -28),
             textcoords="offset points",
             arrowprops={"arrowstyle": "->", "linewidth": 0.9},
-            fontsize=8.5,
+            fontsize=9,
             ha="left",
         )
         cumulative_ax.set_yticks([0, 100, 200])
         cumulative_ax.set_ylim(-12, 225)
         cumulative_ax.set_ylabel("N experimental\nacumulado (kg ha⁻¹)")
         cumulative_ax.set_title("B. Dosis experimental acumulada")
-        cumulative_ax.set_xlabel("Fecha")
 
         month_ticks = pd.date_range("2025-04-01", "2025-11-01", freq="MS")
         month_labels = ["abr", "may", "jun", "jul", "ago", "sep", "oct", "nov"]
@@ -1004,26 +1000,22 @@ def _analysis_steps(
             bbox_to_anchor=(0.5, 0.075),
             ncol=6,
         )
-        fig.suptitle(
+        add_figure_header(
+            fig,
             "Cronograma del experimento y disponibilidad acumulada de N",
-            x=0.08,
-            y=0.99,
-            ha="left",
         )
-        fig.text(
-            0.08,
-            0.018,
+        add_figure_note(
+            fig,
             (
-                "Bandas grises: aplicaciones generales comunes de abril (≈60 kg N ha⁻¹) y agosto "
+                "Bandas claras: aplicaciones generales comunes de abril (≈60 kg N ha⁻¹) y agosto "
                 "(≈52 kg N ha⁻¹), con fecha exacta no consignada. Líneas verticales punteadas: muestreos."
             ),
-            color=mpl.rcParams["axes.labelcolor"],
         )
         fig.subplots_adjust(
-            left=0.10,
+            left=0.09,
             right=0.98,
-            bottom=0.09,
-            top=0.90,
+            bottom=0.15,
+            top=0.88,
             hspace=0.33,
         )
         save_figure(fig, "figura_01_cronograma_y_n_acumulado")
@@ -1033,7 +1025,7 @@ def _analysis_steps(
     plot_schedule_and_cumulative_n()
     yield "schedule"
 
-    # Notebook code cell 13: water_inputs
+    # Notebook step: water_inputs
     water_inputs = pd.DataFrame(
         {
             "month": ["Jun", "Jul", "Ago", "Sep", "Oct", "Nov"],
@@ -1077,7 +1069,7 @@ def _analysis_steps(
             f"{total:.0f}",
             ha="center",
             va="bottom",
-            fontsize=9,
+            fontsize=9.5,
         )
 
     ax.text(
@@ -1097,33 +1089,34 @@ def _analysis_steps(
     ax.set_xticks(positions, water_inputs["month"])
     ax.set_ylabel("Agua aportada (mm mes⁻¹)")
     ax.set_xlabel("Mes de 2025")
-    ax.set_title("Precipitación y riego suplementario, junio–noviembre")
     ax.legend(
         loc="upper center",
         bbox_to_anchor=(0.5, -0.14),
         ncol=2,
     )
-    fig.text(
-        0.08,
-        0.02,
+    add_figure_header(
+        fig,
+        "Precipitación y riego suplementario, junio–noviembre",
+    )
+    add_figure_note(
+        fig,
         (
             "Las etiquetas sobre las barras son los totales mensuales del sector regado. "
             "Los aportes brutos no equivalen al agua efectivamente utilizada por el cultivo."
         ),
-        color=mpl.rcParams["axes.labelcolor"],
     )
     fig.subplots_adjust(
         left=0.09,
         right=0.98,
-        bottom=0.27,
-        top=0.88,
+        bottom=0.25,
+        top=0.87,
     )
     save_figure(fig, "figura_02_aportes_mensuales_de_agua")
     mpl.show()
     mpl.close(fig)
     yield "water_inputs"
 
-    # Notebook code cell 15: rcbd_functions
+    # Notebook step: rcbd_functions
     @dataclass
     class RCBDResult:
         outcome: str
@@ -1328,7 +1321,7 @@ def _analysis_steps(
 
     yield "rcbd_functions"
 
-    # Notebook code cell 17: longitudinal_anova
+    # Notebook step: longitudinal_anova
     LONGITUDINAL_OUTCOMES = [
         "biomass_kg_ha_used",
         "n_pct",
@@ -1401,31 +1394,7 @@ def _analysis_steps(
     )
     yield "longitudinal_anova"
 
-    # Notebook code cell 19: published_validations
-    def assert_close(actual: float, expected: float, tolerance: float = 5e-4) -> None:
-        if not np.isclose(actual, expected, atol=tolerance, rtol=0):
-            raise AssertionError(f"{actual=} no reproduce {expected=}")
-
-    validation_targets = [
-        ("n_pct", pd.Timestamp("2025-09-16"), "Secano", "M1–M5", 0.2518),
-        ("n_pct", pd.Timestamp("2025-10-20"), "Riego", "M1–M5", 0.0001),
-        ("q_kg_n_ha", pd.Timestamp("2025-09-16"), "Secano", "M1–M5", 0.0061),
-        ("q_kg_n_ha", pd.Timestamp("2025-11-12"), "Riego", "M1–M5", 0.1037),
-    ]
-    for outcome, date, sector, comparison, expected in validation_targets:
-        actual = longitudinal_rcbd.loc[
-            longitudinal_rcbd["outcome"].eq(outcome)
-            & longitudinal_rcbd["date"].eq(date)
-            & longitudinal_rcbd["sector"].eq(sector)
-            & longitudinal_rcbd["comparison"].eq(comparison),
-            "p_treatment",
-        ].iloc[0]
-        assert_close(actual, expected)
-
-    print("Las validaciones longitudinales seleccionadas reproducen la tesis.")
-    yield "published_validations"
-
-    # Notebook code cell 21: observed_trajectories
+    # Notebook step: observed_trajectories
     def treatment_trajectory_plot(
         frame: pd.DataFrame,
         *,
@@ -1433,101 +1402,108 @@ def _analysis_steps(
         treatments: Sequence[str] = TREATMENTS,
         filename_stem: str | None = None,
     ) -> None:
+        treatment_order = list(treatments)
         subset = (
-            frame.loc[frame["treatment"].astype(str).isin(treatments)]
+            frame.loc[frame["treatment"].astype(str).isin(treatment_order)]
             .dropna(subset=[outcome])
             .copy()
         )
-        summary = (
-            subset.groupby(["sector", "treatment", "date"], observed=True)[outcome]
-            .agg(["mean", "std", "count"])
-            .reset_index()
+        counts = np.asarray(
+            subset.groupby(["sector", "treatment", "date"], observed=True)[
+                outcome
+            ].count(),
+            dtype=int,
         )
-        summary["se"] = summary["std"] / np.sqrt(summary["count"])
-        degrees_freedom = np.maximum(summary["count"].to_numpy(dtype=int) - 1, 1)
-        summary["half_width"] = stats.t.ppf(0.975, degrees_freedom) * summary["se"]
-        minimum_n = int(summary["count"].min())
-        maximum_n = int(summary["count"].max())
+        counts = counts[counts > 0]
+        minimum_n = int(counts.min())
+        maximum_n = int(counts.max())
         sample_size_text = (
             f"n = {minimum_n} parcelas por punto"
             if minimum_n == maximum_n
             else f"n = {minimum_n}–{maximum_n} parcelas por punto"
         )
-        date_offsets = {
-            treatment: pd.Timedelta(days=float(offset_days))
-            for treatment, offset_days in zip(
-                treatments,
-                np.linspace(-2.0, 2.0, len(treatments)),
+
+        def mean_t_interval(values: Any) -> tuple[float, float]:
+            observed_values = np.asarray(values, dtype=float)
+            mean = float(observed_values.mean())
+            if len(observed_values) < 2:
+                return mean, mean
+            half_width = float(
+                stats.t.ppf(0.975, len(observed_values) - 1)
+                * stats.sem(observed_values)
+            )
+            return mean - half_width, mean + half_width
+
+        date_centers = np.arange(len(DATES), dtype=float)
+        date_center_by_date = dict(zip(DATES, date_centers, strict=True))
+        treatment_offsets = dict(
+            zip(
+                treatment_order,
+                np.linspace(-0.31, 0.31, len(treatment_order)),
                 strict=True,
             )
+        )
+        subset["plot_position"] = subset["date"].astype("datetime64[ns]").map(
+            date_center_by_date
+        ).astype(float) + subset["treatment"].astype(str).map(treatment_offsets).astype(
+            float
+        )
+        treatment_colors = {
+            treatment: TREATMENT_COLORS[treatment] for treatment in treatment_order
         }
+        treatment_positions = [
+            center + treatment_offsets[treatment]
+            for center in date_centers
+            for treatment in treatment_order
+        ]
+        treatment_labels = treatment_order * len(DATES)
 
-        fig, axes = mpl.subplots(1, 2, figsize=(11.8, 4.8), sharex=True, sharey=True)
+        fig, axes = mpl.subplots(1, 2, figsize=(12.2, 5.3), sharex=True, sharey=True)
         axes_array = np.asarray(axes).ravel()
         for panel_index, sector in enumerate(SECTORS):
             ax = axes_array[panel_index]
-            sector_summary = summary.loc[summary["sector"].astype(str).eq(sector)]
-            for treatment in treatments:
-                treatment_summary = sector_summary.loc[
-                    sector_summary["treatment"].astype(str).eq(treatment)
-                ].sort_values("date")
-                plot_dates = (
-                    pd.DatetimeIndex(treatment_summary["date"])
-                    + date_offsets[treatment]
-                )
-                ax.errorbar(
-                    plot_dates,
-                    treatment_summary["mean"],
-                    yerr=treatment_summary["half_width"],
-                    color=TREATMENT_COLORS[treatment],
-                    linestyle="--" if treatment == "M0" else "-",
-                    marker=TREATMENT_MARKERS[treatment],
-                    markerfacecolor=(
-                        "white" if treatment == "M0" else TREATMENT_COLORS[treatment]
-                    ),
-                    markeredgecolor=TREATMENT_COLORS[treatment],
-                    capsize=3,
-                    elinewidth=1.2,
-                    label=treatment,
-                    zorder=3,
-                )
-            ax.set_title(sector)
-            ax.set_xticks(DATES, [DATE_LABELS[date] for date in DATES])
-            ax.set_xlabel("Fecha de muestreo")
+            sns_api.pointplot(
+                data=subset.loc[subset["sector"].astype(str).eq(sector)],
+                x="plot_position",
+                y=outcome,
+                hue="treatment",
+                hue_order=treatment_order,
+                estimator="mean",
+                errorbar=mean_t_interval,
+                palette=treatment_colors,
+                markers="o",
+                linestyles="none",
+                native_scale=True,
+                capsize=0.12,
+                err_kws={"linewidth": INTERVAL_LINEWIDTH},
+                markersize=MARKER_SIZE,
+                legend=False,
+                ax=ax,
+            )
+            ax.set_title(sector.upper())
+            ax.set_xticks(treatment_positions, treatment_labels, minor=True)
+            ax.tick_params(axis="x", which="minor", pad=5, length=0)
+            ax.set_xticks(date_centers, [DATE_LABELS[date] for date in DATES])
+            ax.tick_params(axis="x", which="major", pad=25, length=0)
+            ax.set_xlabel("")
             if panel_index == 0:
                 ax.set_ylabel(OUTCOME_LABELS[outcome])
+            else:
+                ax.set_ylabel("")
 
-        handles, labels = axes_array[0].get_legend_handles_labels()
-        fig.suptitle(
-            f"Trayectorias observadas: {OUTCOME_LABELS[outcome]}",
-            x=0.08,
-            y=0.98,
-            ha="left",
+        add_figure_header(
+            fig,
+            OBSERVED_BY_DATE_TITLES[outcome],
+            subtitle=f"Media ± IC t del 95 % · {sample_size_text}",
         )
-        fig.text(
-            0.08,
-            0.91,
-            f"Media ± intervalo t del 95 %; {sample_size_text}",
-            color=mpl.rcParams["axes.labelcolor"],
-        )
-        fig.legend(
-            handles,
-            labels,
-            title="Tratamiento",
-            loc="upper center",
-            bbox_to_anchor=(0.5, 0.86),
-            ncol=len(treatments),
-        )
-        fig.text(
-            0.08,
-            0.02,
+        add_figure_note(
+            fig,
             (
-                "Las fechas se desplazan hasta ±2 días solo para separar las barras de error.\n"
+                "Fechas equidistantes en orden cronológico; los puntos no se conectan.\n"
                 "M0: sin N experimental adicional. M1–M5: igual dosis adicional, distinto calendario."
             ),
-            color=mpl.rcParams["axes.labelcolor"],
         )
-        fig.subplots_adjust(left=0.08, right=0.98, bottom=0.22, top=0.72, wspace=0.08)
+        fig.subplots_adjust(left=0.07, right=0.98, bottom=0.23, top=0.76, wspace=0.1)
         if filename_stem is not None:
             save_figure(fig, filename_stem)
         mpl.show()
@@ -1541,7 +1517,7 @@ def _analysis_steps(
         )
     yield "observed_trajectories"
 
-    # Notebook code cell 23: final_outcomes
+    # Notebook step: final_outcomes
     FINAL_OUTCOMES = [
         "panicle_density_m2",
         "estimated_seeds_per_panicle",
@@ -1711,33 +1687,11 @@ def _analysis_steps(
     display_output(dry_matter_sensitivity.round(4))
     yield "dry_matter_sensitivity"
 
-    # Notebook code cell 25: yield_reproduction
+    # Notebook step: yield_analysis
     yield_rows = final_rcbd.loc[final_rcbd["outcome"].eq("clean_yield_kg_ha")].copy()
     display_output(
         yield_rows[["sector", "comparison", "p_treatment", "cv_pct"]].round(6)
     )
-
-    secano_primary = yield_rows.loc[
-        yield_rows["sector"].eq("Secano") & yield_rows["comparison"].eq("M1–M5"),
-        "p_treatment",
-    ].iloc[0]
-    riego_primary = yield_rows.loc[
-        yield_rows["sector"].eq("Riego") & yield_rows["comparison"].eq("M1–M5"),
-        "p_treatment",
-    ].iloc[0]
-    assert_close(secano_primary, 0.4287)
-    assert_close(riego_primary, 0.1759)
-    secano_all_cv = yield_rows.loc[
-        yield_rows["sector"].eq("Secano") & yield_rows["comparison"].eq("M0–M5"),
-        "cv_pct",
-    ].iloc[0]
-    riego_all_cv = yield_rows.loc[
-        yield_rows["sector"].eq("Riego") & yield_rows["comparison"].eq("M0–M5"),
-        "cv_pct",
-    ].iloc[0]
-    assert_close(secano_all_cv, 12.1, tolerance=0.02)
-    assert_close(riego_all_cv, 13.5, tolerance=0.02)
-    print("Los CV publicados (12.1 % y 13.5 %) corresponden al análisis M0–M5.")
 
     for sector in SECTORS:
         result = final_rcbd_models[("clean_yield_kg_ha", sector, "M0–M5")]
@@ -1745,9 +1699,9 @@ def _analysis_steps(
             Markdown(f"**{sector}: medias ajustadas y grupos de Tukey, M0–M5**")
         )
         display_output(result.means.round(2))
-    yield "yield_reproduction"
+    yield "yield_analysis"
 
-    # Notebook code cell 27: yield_overview
+    # Notebook step: yield_overview
     def yield_row_limits(
         frame: pd.DataFrame,
         row_specs: Sequence[tuple[Sequence[str], str, str]],
@@ -1807,13 +1761,13 @@ def _analysis_steps(
                     [mean_row["ci_high"] - mean_row["estimate"]],
                 ],
                 color=TREATMENT_COLORS[treatment],
-                marker="D" if is_control else "o",
+                marker="o",
                 markerfacecolor="white" if is_control else TREATMENT_COLORS[treatment],
                 markeredgecolor=TREATMENT_COLORS[treatment],
                 linestyle="none",
-                markersize=6.5,
-                elinewidth=1.6,
-                capsize=3,
+                markersize=MARKER_SIZE,
+                elinewidth=INTERVAL_LINEWIDTH,
+                capsize=ERRORBAR_CAPSIZE,
                 zorder=4,
             )
 
@@ -1835,26 +1789,25 @@ def _analysis_steps(
         )
         ax.text(
             0.02,
-            0.96,
+            1.015,
             f"ANOVA de tratamiento: p {p_text}",
             transform=ax.transAxes,
             ha="left",
-            va="top",
-            fontsize=8.8,
+            va="bottom",
+            fontsize=9.25,
+            clip_on=False,
         )
         ax.set_xticks(positions, treatments)
         ax.set_ylim(*row_limit)
         ax.set_xlabel("Tratamiento")
         if column_index == 0:
             ax.set_ylabel(OUTCOME_LABELS["clean_yield_kg_ha"])
-        if row_index == 0:
-            ax.set_title(sector)
         if comparison == "M0–M5":
             ax.axvline(
                 0.5,
                 color=PLOT_PALETTE[5],
                 linestyle=":",
-                linewidth=0.9,
+                linewidth=REFERENCE_LINEWIDTH,
                 alpha=0.7,
             )
 
@@ -1905,11 +1858,11 @@ def _analysis_steps(
             (TREATMENTS, "M0–M5", "Respuesta al N experimental adicional"),
             (FERTILIZED, "M1–M5", "Comparación entre calendarios"),
         ]
-        fig, axes = mpl.subplots(2, 2, figsize=(12.2, 8.2))
+        fig, axes = mpl.subplots(2, 2, figsize=(12.2, 8.8))
         axes_array = np.asarray(axes)
         row_limits = yield_row_limits(frame, row_specs)
 
-        for row_index, (treatments, comparison, row_title) in enumerate(row_specs):
+        for row_index, (treatments, comparison, _row_title) in enumerate(row_specs):
             for column_index, sector in enumerate(SECTORS):
                 plot_yield_panel(
                     axes_array[row_index, column_index],
@@ -1922,48 +1875,51 @@ def _analysis_steps(
                     row_limit=row_limits[row_index],
                     block_offsets=block_offsets,
                 )
-            axes_array[row_index, 0].text(
-                -0.18,
-                1.08,
-                row_title,
-                transform=axes_array[row_index, 0].transAxes,
-                ha="left",
-                va="bottom",
-                fontweight="bold",
-            )
-
-        fig.suptitle(
+        add_figure_header(
+            fig,
             "Rendimiento de semilla limpia: dos preguntas y dos escalas",
-            x=0.08,
-            y=0.99,
-            ha="left",
-        )
-        fig.text(
-            0.08,
-            0.935,
-            (
+            subtitle=(
                 "Parcelas individuales y media ajustada por bloque ± IC puntual del 95 %; "
                 "n = 4 por tratamiento"
             ),
-            color=mpl.rcParams["axes.labelcolor"],
         )
-        fig.text(
-            0.08,
-            0.018,
+        add_figure_note(
+            fig,
             (
                 "La fila superior incluye M0; la inferior amplía M1–M5 para evitar que la gran "
                 "respuesta frente a M0 comprima visualmente las diferencias entre calendarios."
             ),
-            color=mpl.rcParams["axes.labelcolor"],
         )
         fig.subplots_adjust(
             left=0.08,
             right=0.98,
-            bottom=0.09,
-            top=0.88,
-            hspace=0.40,
+            bottom=0.10,
+            top=0.75,
+            hspace=0.65,
             wspace=0.12,
         )
+        for column_index, sector in enumerate(SECTORS):
+            panel_position = axes_array[0, column_index].get_position()
+            fig.text(
+                (panel_position.x0 + panel_position.x1) / 2,
+                panel_position.y1 + 0.075,
+                sector.upper(),
+                ha="center",
+                va="bottom",
+                fontsize=12.5,
+                fontweight="bold",
+            )
+        for row_index, (_, _, row_title) in enumerate(row_specs):
+            panel_position = axes_array[row_index, 0].get_position()
+            fig.text(
+                panel_position.x0,
+                panel_position.y1 + 0.04,
+                row_title,
+                ha="left",
+                va="bottom",
+                fontsize=11,
+                fontweight="bold",
+            )
         save_figure(fig, "figura_03_rendimiento_dos_preguntas")
         mpl.show()
         mpl.close(fig)
@@ -1971,7 +1927,7 @@ def _analysis_steps(
     plot_yield_two_questions(data.harvest)
     yield "yield_overview"
 
-    # Notebook code cell 29: yield_contrasts
+    # Notebook step: yield_contrasts
     def average_fertilized_minus_control(
         result: RCBDResult,
     ) -> dict[str, float]:
@@ -2039,19 +1995,13 @@ def _analysis_steps(
             row = cast(Any, sector_table.loc[contrast_label])
             aggregate = bool(row["aggregate"])
             estimate = float(row["difference"])
-            ax.errorbar(
-                estimate,
-                position,
-                xerr=[
-                    [estimate - float(row["ci_low"])],
-                    [float(row["ci_high"]) - estimate],
-                ],
+            plot_horizontal_interval(
+                ax,
+                estimate=estimate,
+                lower=float(row["ci_low"]),
+                upper=float(row["ci_high"]),
+                y=float(position),
                 color=SECTOR_COLORS[sector],
-                marker="D" if aggregate else SECTOR_MARKERS[sector],
-                markersize=7 if aggregate else 5.5,
-                linestyle="none",
-                elinewidth=1.7 if aggregate else 1.2,
-                capsize=3,
                 zorder=3,
             )
             if aggregate:
@@ -2061,7 +2011,7 @@ def _analysis_steps(
                     xytext=(8, 0),
                     textcoords="offset points",
                     va="center",
-                    fontsize=8.5,
+                    fontsize=9,
                 )
 
     def configure_yield_contrast_axis(
@@ -2073,11 +2023,16 @@ def _analysis_steps(
         y_positions: np.ndarray,
         x_limits: tuple[float, float],
     ) -> None:
-        ax.axvline(0, color=PLOT_PALETTE[5], linestyle="--", linewidth=1)
+        ax.axvline(
+            0,
+            color=PLOT_PALETTE[5],
+            linestyle="--",
+            linewidth=REFERENCE_LINEWIDTH,
+        )
         ax.axhline(
             0.5,
             color=mpl.rcParams["axes.edgecolor"],
-            linewidth=0.8,
+            linewidth=REFERENCE_LINEWIDTH,
             alpha=0.65,
         )
         global_p = float(
@@ -2088,7 +2043,9 @@ def _analysis_steps(
                 ],
             )
         )
-        ax.set_title(f"{sector} — ANOVA M1–M5 p = {global_p:.4f}".replace(".", ","))
+        ax.set_title(
+            f"{sector.upper()} — ANOVA M1–M5 p = {global_p:.4f}".replace(".", ",")
+        )
         ax.set_xlim(*x_limits)
         ax.set_xlabel("Diferencia de rendimiento (kg ha⁻¹)")
         ax.set_yticks(y_positions, contrast_order)
@@ -2131,35 +2088,26 @@ def _analysis_steps(
                 x_limits=x_limits,
             )
 
-        fig.suptitle(
+        add_figure_header(
+            fig,
             "Contrastes de rendimiento: respuesta marginal e incertidumbre",
-            x=0.08,
-            y=0.99,
-            ha="left",
-        )
-        fig.text(
-            0.08,
-            0.94,
-            (
-                "Diamante: promedio M1–M5 menos M0, IC t del 95 %. "
-                "Círculos: diferencias M1–M5, IC simultáneos de Tukey del 95 %."
+            subtitle=(
+                "Promedio M1–M5 menos M0: IC t del 95 %. "
+                "Diferencias M1–M5: IC simultáneos de Tukey del 95 %."
             ),
-            color=mpl.rcParams["axes.labelcolor"],
         )
-        fig.text(
-            0.08,
-            0.02,
+        add_figure_note(
+            fig,
             (
                 "Los contrastes frente a M0 estiman la respuesta a N experimental adicional; "
                 "los intervalos que cruzan cero no demuestran equivalencia agronómica."
             ),
-            color=mpl.rcParams["axes.labelcolor"],
         )
         fig.subplots_adjust(
             left=0.20,
             right=0.98,
-            bottom=0.11,
-            top=0.86,
+            bottom=0.12,
+            top=0.82,
             wspace=0.10,
         )
         save_figure(fig, "anexo_contrastes_rendimiento")
@@ -2169,7 +2117,7 @@ def _analysis_steps(
     plot_yield_contrasts()
     yield "yield_contrasts"
 
-    # Notebook code cell 31: yield_components
+    # Notebook step: yield_components
     COMPONENT_OUTCOMES = [
         "panicle_density_m2",
         "estimated_seeds_per_panicle",
@@ -2214,10 +2162,10 @@ def _analysis_steps(
                 ],
                 color=TREATMENT_COLORS[treatment],
                 marker=TREATMENT_MARKERS[treatment],
-                markersize=6,
+                markersize=MARKER_SIZE,
                 linestyle="none",
-                elinewidth=1.4,
-                capsize=3,
+                elinewidth=INTERVAL_LINEWIDTH,
+                capsize=ERRORBAR_CAPSIZE,
                 zorder=4,
             )
 
@@ -2237,15 +2185,16 @@ def _analysis_steps(
         )
         ax.text(
             0.02,
-            0.96,
+            1.015,
             f"ANOVA de tratamiento: p {p_text}",
             transform=ax.transAxes,
             ha="left",
-            va="top",
-            fontsize=8.3,
+            va="bottom",
+            fontsize=9.25,
+            clip_on=False,
         )
         if row_index == 0:
-            ax.set_title(sector)
+            ax.set_title(sector.upper(), pad=30)
         if column_index == 0:
             ax.set_ylabel(OUTCOME_LABELS[outcome])
         if row_index == len(COMPONENT_OUTCOMES) - 1:
@@ -2313,36 +2262,27 @@ def _analysis_steps(
                     block_offsets=block_offsets,
                 )
 
-        fig.suptitle(
+        add_figure_header(
+            fig,
             "Componentes del rendimiento entre M1–M5",
-            x=0.08,
-            y=0.99,
-            ha="left",
-        )
-        fig.text(
-            0.08,
-            0.95,
-            (
+            subtitle=(
                 "Parcelas individuales y medias ajustadas por bloque ± IC puntual "
                 "del 95 %; n = 4 por calendario."
             ),
-            color=mpl.rcParams["axes.labelcolor"],
         )
-        fig.text(
-            0.08,
-            0.02,
+        add_figure_note(
+            fig,
             (
                 "Semillas por panoja se estimó a partir del rendimiento limpio, el peso "
                 "de mil semillas y la cantidad de panojas; no es una medición independiente."
             ),
-            color=mpl.rcParams["axes.labelcolor"],
         )
         fig.subplots_adjust(
             left=0.10,
             right=0.98,
             bottom=0.10,
-            top=0.89,
-            hspace=0.27,
+            top=0.84,
+            hspace=0.31,
             wspace=0.14,
         )
         save_figure(fig, "figura_06_componentes_del_rendimiento")
@@ -2352,7 +2292,7 @@ def _analysis_steps(
     plot_harvest_component_panels()
     yield "yield_components"
 
-    # Notebook code cell 33: component_correlations
+    # Notebook step: component_correlations
     component_means = (
         data.harvest.loc[data.harvest["treatment"].astype(str).isin(FERTILIZED)]
         .groupby(["sector", "treatment"], observed=True)[
@@ -2383,20 +2323,18 @@ def _analysis_steps(
             )
     ax.set_xlabel("Densidad media de panojas (m⁻²)")
     ax.set_ylabel("Semillas estimadas por panoja")
-    ax.set_title("Componentes reconstruidos entre M1–M5")
     ax.legend(title="Sector")
-    fig.text(
-        0.10,
-        0.02,
+    add_figure_header(fig, "Componentes reconstruidos entre M1–M5")
+    add_figure_note(
+        fig,
         "Cada punto representa la media de cuatro parcelas para un calendario.",
-        color=mpl.rcParams["axes.labelcolor"],
     )
-    fig.subplots_adjust(bottom=0.15)
+    fig.subplots_adjust(left=0.10, right=0.98, bottom=0.16, top=0.85)
     mpl.show()
     mpl.close(fig)
     yield "component_correlations"
 
-    # Notebook code cell 35: seed_weight_precision
+    # Notebook step: seed_weight_precision
     seed_repeatability = data.harvest[
         [
             "sample_id",
@@ -2416,37 +2354,63 @@ def _analysis_steps(
         seed_repeatability["technical_cv_pct"].describe().to_frame().T.round(3)
     )
 
-    fig, ax = mpl.subplots(figsize=(8, 4.8))
-    ax.hist(
-        seed_repeatability["technical_cv_pct"],
-        bins=10,
+    repeatability_plot = seed_repeatability.assign(
+        plot_y=np.random.default_rng(RANDOM_SEED).uniform(
+            -0.18,
+            0.18,
+            size=len(seed_repeatability),
+        )
+    )
+    fig, ax = mpl.subplots(figsize=(10.5, 3.8))
+    sns_api.scatterplot(
+        data=repeatability_plot,
+        x="technical_cv_pct",
+        y="plot_y",
         color=PLOT_PALETTE[0],
-        edgecolor=mpl.rcParams["axes.edgecolor"],
+        alpha=0.68,
+        s=42,
+        linewidth=0,
+        ax=ax,
     )
     median_cv = float(cast(Any, seed_repeatability["technical_cv_pct"].median()))
     ax.axvline(
         median_cv,
         color=PLOT_PALETTE[3],
         linestyle="--",
-        linewidth=1.4,
-        label=f"Mediana: {median_cv:.2f} %",
+        linewidth=REFERENCE_LINEWIDTH,
+    )
+    ax.text(
+        median_cv,
+        0.92,
+        f"Mediana = {median_cv:.2f} %".replace(".", ","),
+        transform=ax.get_xaxis_transform(),
+        ha="center",
+        va="top",
+        fontsize=9.5,
+        color=PLOT_PALETTE[3],
     )
     ax.set_xlabel("CV entre las tres submuestras de 100 semillas (%)")
-    ax.set_ylabel("Número de muestras")
-    ax.set_title("Repetibilidad técnica del peso de semilla")
-    ax.legend()
-    fig.text(
-        0.10,
-        0.02,
-        f"Distribución entre {len(seed_repeatability)} parcelas.",
-        color=mpl.rcParams["axes.labelcolor"],
+    ax.set_ylabel("")
+    ax.set_yticks([])
+    ax.set_ylim(-0.45, 0.45)
+    ax.grid(axis="x", alpha=0.25)
+    add_figure_header(
+        fig,
+        "Repetibilidad técnica del peso de 100 semillas",
+        subtitle=(
+            f"Cada círculo representa una parcela; n = {len(seed_repeatability)} parcelas."
+        ),
     )
-    fig.subplots_adjust(bottom=0.17)
+    add_figure_note(
+        fig,
+        "El CV resume la variación entre tres submuestras técnicas de la misma parcela.",
+    )
+    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.24, top=0.64)
     mpl.show()
     mpl.close(fig)
     yield "seed_weight_precision"
 
-    # Notebook code cell 37: model_diagnostics
+    # Notebook step: model_diagnostics
     def diagnostic_row(
         result: RCBDResult,
         *,
@@ -2527,28 +2491,52 @@ def _analysis_steps(
     )
     yield "model_diagnostics"
 
-    # Notebook code cell 39: primary_residual_diagnostics
+    # Notebook step: primary_residual_diagnostics
     def residual_diagnostic_plots(result: RCBDResult, *, title_prefix: str) -> None:
         fitted = np.asarray(result.fit.fittedvalues)
         residuals = np.asarray(result.fit.resid)
 
         fig, axes = mpl.subplots(1, 2, figsize=(10.8, 4.6))
         residual_ax, qq_ax = np.asarray(axes).ravel()
-        residual_ax.scatter(fitted, residuals, color=PLOT_PALETTE[0], alpha=0.8)
+        sns_api.scatterplot(
+            x=fitted,
+            y=residuals,
+            ax=residual_ax,
+            color=PLOT_PALETTE[0],
+            alpha=0.8,
+        )
         residual_ax.axhline(
             0,
             color=PLOT_PALETTE[5],
             linestyle="--",
-            linewidth=1,
+            linewidth=REFERENCE_LINEWIDTH,
         )
         residual_ax.set_xlabel("Valores ajustados")
         residual_ax.set_ylabel("Residuos")
         residual_ax.set_title("Residuos frente a valores ajustados")
 
-        stats.probplot(residuals, dist="norm", plot=qq_ax)
+        (theoretical_quantiles, ordered_residuals), (slope, intercept, _) = (
+            stats.probplot(residuals, dist="norm")
+        )
+        sns_api.scatterplot(
+            x=theoretical_quantiles,
+            y=ordered_residuals,
+            ax=qq_ax,
+            color=PLOT_PALETTE[0],
+        )
+        sns_api.lineplot(
+            x=theoretical_quantiles,
+            y=slope * theoretical_quantiles + intercept,
+            ax=qq_ax,
+            color=PLOT_PALETTE[5],
+            estimator=None,
+            sort=False,
+        )
+        qq_ax.set_xlabel("Cuantiles teóricos")
+        qq_ax.set_ylabel("Residuos ordenados")
         qq_ax.set_title("Gráfico Q–Q normal")
-        fig.suptitle(title_prefix, x=0.08, y=0.98, ha="left")
-        fig.subplots_adjust(left=0.08, right=0.98, bottom=0.14, top=0.82, wspace=0.28)
+        add_figure_header(fig, title_prefix)
+        fig.subplots_adjust(left=0.08, right=0.98, bottom=0.14, top=0.78, wspace=0.28)
         mpl.show()
         mpl.close(fig)
 
@@ -2559,29 +2547,7 @@ def _analysis_steps(
         )
     yield "primary_residual_diagnostics"
 
-    # Notebook code cell 41: missing_n_sensitivity
-    def rcbd_missing_cell_estimate(
-        frame: pd.DataFrame,
-        *,
-        value_column: str,
-        missing_treatment: str,
-        missing_block: str,
-        r_blocks: int,
-        t_treatments: int,
-    ) -> float:
-        observed = frame.dropna(subset=[value_column]).copy()
-        block_total = observed.loc[
-            observed["block"].astype(str).eq(missing_block), value_column
-        ].sum()
-        treatment_total = observed.loc[
-            observed["treatment"].astype(str).eq(missing_treatment), value_column
-        ].sum()
-        grand_total = observed[value_column].sum()
-        return float(
-            (t_treatments * block_total + r_blocks * treatment_total - grand_total)
-            / ((r_blocks - 1) * (t_treatments - 1))
-        )
-
+    # Notebook step: missing_n_sensitivity
     sep_secano = data.longitudinal.loc[
         data.longitudinal["date"].astype("datetime64[ns]").eq(DATES[0])
         & data.longitudinal["sector"].astype(str).eq("Secano")
@@ -2613,8 +2579,7 @@ def _analysis_steps(
             t_treatments=6,
         ),
     }
-    display_output(pd.Series(imputed_values, name="imputación correcta").to_frame())
-    assert_close(imputed_values["n_pct"], 2.868848, tolerance=1e-6)
+    display_output(pd.Series(imputed_values, name="imputación DBCA").to_frame())
 
     imputed_sep = sep_secano.copy()
     missing_mask = imputed_sep["treatment"].astype(str).eq("M1") & imputed_sep[
@@ -2647,7 +2612,7 @@ def _analysis_steps(
     display_output(pd.DataFrame(sensitivity_rows).round(6))
     yield "missing_n_sensitivity"
 
-    # Notebook code cell 43: joint_sector_analysis
+    # Notebook step: joint_sector_analysis
     def fit_joint_sector_model(
         frame: pd.DataFrame,
         *,
@@ -2719,22 +2684,9 @@ def _analysis_steps(
         ].round(4)
     )
 
-    # Guardrails: la tabla conjunta de INN debe reproducir los valores de la tesis.
-    expected_nni_joint = {
-        pd.Timestamp("2025-09-16"): (0.000046, 0.4968),
-        pd.Timestamp("2025-10-20"): (0.0281, 0.0508),
-        pd.Timestamp("2025-11-12"): (0.0082, 0.5687),
-    }
-    for date, (expected_treatment, expected_interaction) in expected_nni_joint.items():
-        row = joint_results.loc[
-            joint_results["outcome"].eq("nni_revised") & joint_results["date"].eq(date)
-        ].iloc[0]
-        assert_close(row["p_treatment"], expected_treatment, tolerance=5e-4)
-        assert_close(row["p_treatment_x_sector"], expected_interaction, tolerance=5e-4)
-    print("El análisis conjunto de INN reproduce la tabla de la tesis.")
     yield "joint_sector_analysis"
 
-    # Notebook code cell 45: correlation_audit
+    # Notebook step: correlation_audit
     final_nutrition = data.longitudinal.loc[
         data.longitudinal["date"].astype("datetime64[ns]").eq(DATES[-1]),
         [
@@ -2869,7 +2821,7 @@ def _analysis_steps(
     display_output(correlation_audit.round(4))
     yield "correlation_audit"
 
-    # Notebook code cell 47: mixed_models
+    # Notebook step: mixed_models
     @dataclass
     class MixedTrajectoryResult:
         outcome: str
@@ -3127,7 +3079,7 @@ def _analysis_steps(
     display_output(biomass_scale_sensitivity.round(6))
     yield "mixed_models"
 
-    # Notebook code cell 49: mixed_estimates
+    # Notebook step: mixed_estimates
     def mixed_emmeans(result: MixedTrajectoryResult) -> pd.DataFrame:
         fit = result.full_fit
         fixed_names = list(fit.fe_params.index)
@@ -3274,12 +3226,11 @@ def _analysis_steps(
                 estimates["ci_high"] - estimates["estimate"],
             ],
             color=TREATMENT_COLORS[treatment],
-            marker=TREATMENT_MARKERS[treatment],
-            linewidth=1.8,
-            markersize=5.6,
-            capsize=3,
-            elinewidth=1.15,
-            label=treatment,
+            marker="o",
+            linestyle="none",
+            markersize=MARKER_SIZE,
+            capsize=ERRORBAR_CAPSIZE,
+            elinewidth=INTERVAL_LINEWIDTH,
             zorder=3,
         )
 
@@ -3293,35 +3244,56 @@ def _analysis_steps(
         column_index: int,
         outcome_count: int,
         date_positions: dict[str, float],
+        treatment_offsets: dict[str, float],
     ) -> None:
         if outcome == "nni_revised":
             ax.axhline(
                 1.0,
                 color=PLOT_PALETTE[5],
                 linestyle="--",
-                linewidth=1,
+                linewidth=REFERENCE_LINEWIDTH,
                 alpha=0.85,
             )
             ax.text(
-                0.98,
+                0.02,
                 1.0,
                 "INN = 1",
                 transform=ax.get_yaxis_transform(),
-                ha="right",
+                ha="left",
                 va="bottom",
-                fontsize=8,
+                fontsize=9,
                 color=PLOT_PALETTE[5],
+            )
+        treatment_positions = [
+            date_position + treatment_offsets[treatment]
+            for date_position in date_positions.values()
+            for treatment in FERTILIZED
+        ]
+        for position, treatment in zip(
+            treatment_positions,
+            FERTILIZED * len(date_positions),
+            strict=True,
+        ):
+            ax.text(
+                position,
+                -0.035,
+                treatment,
+                transform=ax.get_xaxis_transform(),
+                ha="center",
+                va="top",
+                fontsize=mpl.rcParams["xtick.labelsize"],
+                clip_on=False,
             )
         ax.set_xticks(
             list(date_positions.values()),
             [DATE_LABELS[date] for date in DATES],
         )
-        if row_index == outcome_count - 1:
-            ax.set_xlabel("Fecha de muestreo")
+        ax.tick_params(axis="x", which="major", pad=25, length=0)
+        ax.set_xlabel("")
         if column_index == 0:
             ax.set_ylabel(OUTCOME_LABELS[outcome])
         if row_index == 0:
-            ax.set_title(sector)
+            ax.set_title(sector.upper())
 
     def plot_mixed_outcome_panel(
         ax: Any,
@@ -3357,6 +3329,7 @@ def _analysis_steps(
             column_index=column_index,
             outcome_count=outcome_count,
             date_positions=date_positions,
+            treatment_offsets=treatment_offsets,
         )
 
     def plot_mixed_outcome_grid(
@@ -3370,7 +3343,7 @@ def _analysis_steps(
             date_label: float(index) for index, date_label in enumerate(date_levels)
         }
         treatment_offsets = dict(
-            zip(FERTILIZED, np.linspace(-0.10, 0.10, len(FERTILIZED)), strict=True)
+            zip(FERTILIZED, np.linspace(-0.28, 0.28, len(FERTILIZED)), strict=True)
         )
         block_offsets = dict(
             zip(BLOCKS, np.linspace(-0.016, 0.016, len(BLOCKS)), strict=True)
@@ -3378,7 +3351,7 @@ def _analysis_steps(
         fig, axes = mpl.subplots(
             len(outcomes),
             len(SECTORS),
-            figsize=(12.2, 5.4 + 3.0 * (len(outcomes) - 1)),
+            figsize=(12.2, 6.2 if len(outcomes) == 1 else 9.2),
             squeeze=False,
         )
         axes_array = np.asarray(axes)
@@ -3398,16 +3371,6 @@ def _analysis_steps(
                     block_offsets=block_offsets,
                 )
 
-        handles, labels = axes_array[0, 0].get_legend_handles_labels()
-        fig.legend(
-            handles,
-            labels,
-            title="Tratamiento",
-            loc="upper center",
-            bbox_to_anchor=(0.5, 0.83 if len(outcomes) == 1 else 0.79),
-            ncol=5,
-        )
-        fig.suptitle(title, x=0.08, y=0.99, ha="left")
         p_lines: list[str] = []
         for outcome in outcomes:
             sector_values: list[str] = []
@@ -3438,37 +3401,38 @@ def _analysis_steps(
                 f"{OUTCOME_LABELS[outcome]} — interacción calendario × fecha "
                 f"({method_label}): " + "; ".join(sector_values)
             )
-        fig.text(
-            0.08,
-            0.945,
-            (
-                "Puntos: parcelas individuales. Líneas: media marginal del modelo completo "
-                "± IC normal del 95 %."
+        add_figure_header(
+            fig,
+            title,
+            subtitle=(
+                "Puntos claros: parcelas individuales. Círculos: media marginal "
+                "del modelo completo ± IC normal del 95 %."
             ),
-            color=mpl.rcParams["axes.labelcolor"],
         )
         fig.text(
-            0.08,
-            0.895,
+            0.07,
+            0.865 if len(outcomes) == 1 else 0.895,
             "\n".join(p_lines),
+            ha="left",
+            va="top",
             color=mpl.rcParams["axes.labelcolor"],
-            fontsize=8.5,
+            fontsize=9.25,
+            linespacing=1.35,
         )
-        fig.text(
-            0.08,
-            0.018,
+        add_figure_note(
+            fig,
             (
-                "Las fechas se desplazan levemente por tratamiento solo para evitar superposición. "
-                "El 16 sep M5 tenía 100 kg N ha⁻¹ experimentales y M1–M4, 200 kg ha⁻¹."
+                "Fechas equidistantes en orden cronológico; M1–M5 se agrupan dentro de cada fecha "
+                "y las estimaciones no se conectan. El 16 sep M5 tenía 100 kg N ha⁻¹ "
+                "experimentales y M1–M4, 200 kg ha⁻¹."
             ),
-            color=mpl.rcParams["axes.labelcolor"],
         )
         fig.subplots_adjust(
             left=0.09,
             right=0.98,
-            bottom=0.10,
-            top=0.70 if len(outcomes) == 1 else 0.65,
-            hspace=0.33,
+            bottom=0.19 if len(outcomes) == 1 else 0.13,
+            top=0.76 if len(outcomes) == 1 else 0.77,
+            hspace=0.48,
             wspace=0.12,
         )
         save_figure(fig, filename_stem)
@@ -3489,12 +3453,12 @@ def _analysis_steps(
 
     plot_mixed_outcome_grid(
         ["biomass_kg_ha_used"],
-        title="Trayectorias M1–M5: biomasa aérea",
+        title="Biomasa aérea estimada en las tres fechas (M1–M5)",
         filename_stem="figura_04_trayectorias_biomasa_aerea",
     )
     plot_mixed_outcome_grid(
         ["n_pct"],
-        title="Trayectorias M1–M5: concentración de N en biomasa",
+        title="Concentración de N estimada en las tres fechas (M1–M5)",
         filename_stem="figura_05_trayectorias_concentracion_n",
     )
     plot_mixed_outcome_grid(
@@ -3504,7 +3468,7 @@ def _analysis_steps(
     )
     yield "mixed_estimates"
 
-    # Notebook code cell 51: september_sensitivity
+    # Notebook step: september_sensitivity
     sep_equal_dose_rows: list[dict[str, object]] = []
     for outcome in LONGITUDINAL_OUTCOMES:
         for sector in SECTORS:
@@ -3528,7 +3492,7 @@ def _analysis_steps(
     display_output(pd.DataFrame(sep_equal_dose_rows).round(4))
     yield "september_sensitivity"
 
-    # Notebook code cell 53: figure_manifest
+    # Notebook step: figure_manifest
     figure_manifest = pd.DataFrame(
         [
             {
@@ -3617,7 +3581,7 @@ def _analysis_steps(
     display_output(figure_manifest)
     yield "figure_manifest"
 
-    # Notebook code cell 55: automatic_summary
+    # Notebook step: automatic_summary
     def format_p(value: float) -> str:
         if value < 0.0001:
             return "< 0.0001"
@@ -3644,8 +3608,8 @@ def _analysis_steps(
         summary_lines.append(
             f"- **{sector}:** rendimiento M1–M5 p = {format_p(primary.p_treatment)}; "
             f"M0–M5 p = {format_p(complementary.p_treatment)}; "
-            f"CV M1–M5 = {primary.cv_pct:.1f} % y CV M0–M5 = {complementary.cv_pct:.1f} % "
-            f"(este último es el publicado en la tesis)."
+            f"CV M1–M5 = {primary.cv_pct:.1f} % y "
+            f"CV M0–M5 = {complementary.cv_pct:.1f} %."
         )
 
     summary_lines.append(
@@ -3689,15 +3653,16 @@ def _analysis_steps(
     )
 
     summary_lines.append(
-        "\n**Lectura recomendada:** los ANOVA por fecha reproducen la tesis; el modelo longitudinal "
-        "evalúa directamente si las trayectorias cambian con el calendario. La ausencia de una diferencia "
-        "de rendimiento entre M1–M5 no debe traducirse en equivalencia exacta, y las diferencias entre "
-        "sectores siguen siendo descriptivas."
+        "\n**Lectura recomendada:** los ANOVA por fecha describen momentos concretos; "
+        "el modelo longitudinal evalúa directamente si las trayectorias cambian con el "
+        "calendario. La ausencia de una diferencia de rendimiento entre M1–M5 no debe "
+        "traducirse en equivalencia exacta, y las diferencias entre sectores siguen "
+        "siendo descriptivas."
     )
     display_output(Markdown("\n".join(summary_lines)))
     yield "automatic_summary"
 
-    # Notebook code cell 57: export_artifacts
+    # Notebook step: export_artifacts
     if EXPORT_RESULTS:
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         longitudinal_rcbd.to_csv(

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
+import matplotlib as mpl
 import numpy as np
 import pandas as pd
+from matplotlib.colors import to_hex
 
 from festuca_analysis.annex import (
     TREATMENTS,
@@ -15,17 +17,79 @@ from festuca_analysis.annex import (
     prior_predictive_summary,
     prior_specification_table,
 )
+from festuca_analysis.plotting import (
+    DATA_LINEWIDTH,
+    ERRORBAR_CAPSIZE,
+    GRID_LINEWIDTH,
+    INTERVAL_LINEWIDTH,
+    PLOT_FONT_FAMILY,
+    REFERENCE_LINEWIDTH,
+    apply_plot_theme,
+)
 from festuca_analysis.statistics import (
     benjamini_hochberg,
     fit_mixedlm_best,
     likelihood_ratio,
+    rcbd_missing_cell_estimate,
 )
+
+
+class PlotThemeTests(unittest.TestCase):
+    def test_seaborn_theme_exposes_inferno_palette_and_line_hierarchy(self) -> None:
+        mpl_api = cast(Any, mpl)
+        with mpl_api.rc_context():
+            palette = apply_plot_theme()
+            cycle = mpl_api.rcParams["axes.prop_cycle"].by_key()["color"]
+            self.assertEqual(len(palette), 9)
+            self.assertEqual([to_hex(color) for color in cycle[:9]], palette)
+            self.assertEqual(mpl_api.rcParams["axes.grid.axis"], "y")
+            self.assertEqual(mpl_api.rcParams["font.family"], [PLOT_FONT_FAMILY])
+            self.assertEqual(mpl_api.rcParams["lines.linewidth"], DATA_LINEWIDTH)
+            self.assertEqual(mpl_api.rcParams["errorbar.capsize"], ERRORBAR_CAPSIZE)
+            self.assertEqual(mpl_api.rcParams["grid.linewidth"], GRID_LINEWIDTH)
+            self.assertGreater(DATA_LINEWIDTH, INTERVAL_LINEWIDTH)
+            self.assertGreater(INTERVAL_LINEWIDTH, REFERENCE_LINEWIDTH)
+            self.assertFalse(mpl_api.rcParams["axes.spines.top"])
+            self.assertFalse(mpl_api.rcParams["axes.spines.right"])
 
 
 class MultiplicityTests(unittest.TestCase):
     def test_benjamini_hochberg_preserves_order_and_monotonicity(self) -> None:
         adjusted = benjamini_hochberg([0.04, 0.001, 0.03, 0.20])
         np.testing.assert_allclose(adjusted, [0.05333333, 0.004, 0.05333333, 0.20])
+
+
+class MissingCellTests(unittest.TestCase):
+    def test_rcbd_estimate_weights_totals_by_their_denominators(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "treatment": ["A"] * 3 + ["B"] * 3 + ["C"] * 3 + ["D"] * 3,
+                "block": ["R1", "R2", "R3"] * 4,
+                "value": [
+                    10.0,
+                    12.0,
+                    np.nan,
+                    13.0,
+                    12.0,
+                    15.0,
+                    9.0,
+                    11.0,
+                    10.0,
+                    16.0,
+                    15.0,
+                    17.0,
+                ],
+            }
+        )
+        estimate = rcbd_missing_cell_estimate(
+            frame,
+            value_column="value",
+            missing_treatment="A",
+            missing_block="R3",
+            r_blocks=3,
+            t_treatments=4,
+        )
+        self.assertAlmostEqual(estimate, 12.333333333333334)
 
 
 class MixedOptimizerTests(unittest.TestCase):

@@ -23,6 +23,7 @@ dependencies = [
     "patsy>=1,<2",
     "pymc==5.27.1",
     "scipy>=1.11,<2",
+    "seaborn>=0.13,<1",
     "statsmodels>=0.14,<1",
     "xarray>=2025,<2027",
 ]
@@ -67,3 +68,6 @@ package = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+festuca_analysis = ["fonts/*.otf", "fonts/*.txt"]

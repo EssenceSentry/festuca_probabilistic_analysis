@@ -19,6 +19,20 @@ from scipy.linalg import helmert
 from scipy.stats import f as f_dist
 from scipy.stats import geninvgauss
 
+from festuca_analysis.plotting import (
+    DATA_LINEWIDTH,
+    EMPHASIS_LINEWIDTH,
+    ERRORBAR_CAPSIZE,
+    INTERVAL_LINEWIDTH,
+    MARKER_SIZE,
+    REFERENCE_LINEWIDTH,
+    SECONDARY_LINEWIDTH,
+    add_figure_header,
+    add_figure_note,
+    apply_plot_theme,
+    plot_horizontal_interval,
+)
+
 RANDOM_SEED = 20260807
 TREATMENTS = [f"M{i}" for i in range(6)]
 FERTILIZED = TREATMENTS[1:]
@@ -934,6 +948,7 @@ def plot_observed_yield_panels(
     *,
     yield_data: pd.DataFrame,
     treatment_means: pd.DataFrame,
+    treatment_colors: dict[str, str],
 ) -> None:
     rng = np.random.default_rng(RANDOM_SEED)
     for axis, sector in zip(axes, SECTORS):
@@ -946,68 +961,110 @@ def plot_observed_yield_panels(
             .set_index("treatment")
             .reindex(TREATMENTS)
         )
-        x = np.arange(6)
         for index, treatment in enumerate(TREATMENTS):
             values = observed.loc[
                 observed["treatment"].astype(str).eq(treatment),
                 "clean_yield_kg_ha",
             ].to_numpy()
             jitter = rng.normal(0.0, 0.035, size=len(values))
-            axis.scatter(np.full(len(values), index) + jitter, values, alpha=0.55, s=26)
-        axis.errorbar(
-            x,
-            posterior["posterior_mean"],
-            yerr=np.vstack(
-                [
-                    posterior["posterior_mean"] - posterior["lower_95"],
-                    posterior["upper_95"] - posterior["posterior_mean"],
-                ]
-            ),
-            fmt="o",
-            capsize=4,
-            linewidth=1.6,
-            label="Media posterior e IC 95 %",
-        )
-        axis.set_xticks(x, TREATMENTS)
-        axis.set_title(sector)
+            axis.scatter(
+                np.full(len(values), index) + jitter,
+                values,
+                color=treatment_colors[treatment],
+                alpha=0.45,
+                s=26,
+                linewidths=0,
+            )
+            row = posterior.loc[treatment]
+            axis.errorbar(
+                index,
+                row["posterior_mean"],
+                yerr=np.array(
+                    [
+                        [row["posterior_mean"] - row["lower_95"]],
+                        [row["upper_95"] - row["posterior_mean"]],
+                    ]
+                ),
+                color=treatment_colors[treatment],
+                marker="o",
+                linestyle="none",
+                markerfacecolor=(
+                    "white" if treatment == "M0" else treatment_colors[treatment]
+                ),
+                markeredgecolor=treatment_colors[treatment],
+                markersize=MARKER_SIZE,
+                capsize=ERRORBAR_CAPSIZE,
+                elinewidth=INTERVAL_LINEWIDTH,
+                label="Media posterior e IC 95 %" if index == 0 else None,
+            )
+        axis.set_xticks(np.arange(len(TREATMENTS)), TREATMENTS)
+        axis.set_title(sector.upper())
         axis.set_xlabel("Tratamiento")
         axis.grid(axis="y", alpha=0.25)
 
 
-def plot_margin_panels(axes: Any, margins: pd.DataFrame) -> None:
+def plot_margin_panels(
+    axes: Any,
+    margins: pd.DataFrame,
+    *,
+    principal_color: str,
+) -> None:
     for axis, sector in zip(axes, SECTORS):
         subset = margins.loc[margins["sector"].eq(sector)]
-        for specification, group in subset.groupby("specification", sort=False):
-            linewidth = 2.6 if specification == "Principal" else 1.4
+        principal = subset.loc[subset["specification"].eq("Principal")]
+        axis.plot(
+            principal["margin_kg_ha"],
+            principal["p_range_gt_margin"],
+            color=principal_color,
+            linewidth=EMPHASIS_LINEWIDTH,
+            zorder=3,
+        )
+        alternatives = subset.loc[subset["specification"].ne("Principal")]
+        for _, group in alternatives.groupby("specification", sort=False):
             axis.plot(
                 group["margin_kg_ha"],
                 group["p_range_gt_margin"],
-                label=specification,
-                linewidth=linewidth,
+                color="0.48",
+                alpha=0.52,
+                linewidth=SECONDARY_LINEWIDTH,
+                zorder=2,
             )
-        axis.axvline(100.0, linestyle="--", linewidth=1.0)
-        axis.axhline(0.5, linestyle=":", linewidth=1.0)
-        axis.set_title(sector)
+        axis.axvline(100.0, linestyle="--", linewidth=REFERENCE_LINEWIDTH)
+        axis.axhline(0.5, linestyle=":", linewidth=REFERENCE_LINEWIDTH)
+        axis.set_title(sector.upper())
         axis.set_xlabel("Margen práctico δ (kg/ha)")
         axis.set_ylim(-0.02, 1.02)
         axis.grid(alpha=0.22)
 
 
-def plot_near_optimal_panels(axes: Any, primary_ranks: pd.DataFrame) -> None:
+def plot_near_optimal_panels(
+    axes: Any,
+    primary_ranks: pd.DataFrame,
+    *,
+    treatment_colors: dict[str, str],
+) -> None:
     for axis, sector in zip(axes, SECTORS):
         group = (
             primary_ranks.loc[primary_ranks["sector"].eq(sector)]
             .set_index("treatment")
             .reindex(FERTILIZED)
         )
-        axis.bar(FERTILIZED, group["p_within_100_best"])
-        axis.set_title(sector)
+        axis.bar(
+            FERTILIZED,
+            group["p_within_100_best"],
+            color=[treatment_colors[treatment] for treatment in FERTILIZED],
+        )
+        axis.set_title(sector.upper())
         axis.set_xlabel("Calendario")
         axis.set_ylim(0.0, 1.0)
         axis.grid(axis="y", alpha=0.22)
         for index, value in enumerate(group["p_within_100_best"]):
             axis.text(
-                index, value + 0.025, f"{100 * value:.0f}%", ha="center", fontsize=9
+                index,
+                value + 0.025,
+                f"{100 * value:.0f}%",
+                ha="center",
+                fontsize=9.5,
             )
 
 
@@ -1050,8 +1107,13 @@ def plot_leave_one_out_panels(
             & margins["margin_kg_ha"].eq(100.0),
             "p_range_gt_margin",
         ].iloc[0]
-        axis.axhline(full_value, linestyle="--", label="Todos los bloques")
-        axis.set_title(sector)
+        axis.axhline(
+            full_value,
+            linestyle="--",
+            linewidth=REFERENCE_LINEWIDTH,
+            label="Todos los bloques",
+        )
+        axis.set_title(sector.upper())
         axis.set_xlabel("Bloque omitido")
         axis.set_ylim(0.0, 1.0)
         axis.grid(axis="y", alpha=0.22)
@@ -1062,11 +1124,19 @@ def plot_ppc_panels(axes: Any, ppc_draws: pd.DataFrame) -> None:
     for axis, sector in zip(axes, SECTORS):
         values = ppc_draws.loc[ppc_draws["sector"].eq(sector), "p_value_m1_m5"]
         axis.hist(values, bins=np.linspace(0, 1, 31), density=True, alpha=0.75)
-        axis.axvline(0.05, linestyle="--", linewidth=1.2, label="0,05")
         axis.axvline(
-            observed_p[sector], linestyle=":", linewidth=1.8, label="p observado"
+            0.05,
+            linestyle="--",
+            linewidth=REFERENCE_LINEWIDTH,
+            label="0,05",
         )
-        axis.set_title(sector)
+        axis.axvline(
+            observed_p[sector],
+            linestyle=":",
+            linewidth=DATA_LINEWIDTH,
+            label="p observado",
+        )
+        axis.set_title(sector.upper())
         axis.set_xlabel("p del ANOVA M1–M5 en un ensayo replicado")
         axis.grid(axis="y", alpha=0.18)
 
@@ -1077,10 +1147,13 @@ def plot_trajectory_panels(
     *,
     value_column: str,
     y_label: str,
-    legend_location: str,
+    treatment_colors: dict[str, str],
     reference: float | None = None,
 ) -> None:
     date_x = np.arange(3)
+    treatment_offsets = dict(
+        zip(TREATMENTS, np.linspace(-0.31, 0.31, len(TREATMENTS)), strict=True)
+    )
     for axis, sector in zip(axes, SECTORS):
         subset = frame.loc[frame["sector"].eq(sector)]
         for treatment in TREATMENTS:
@@ -1089,21 +1162,60 @@ def plot_trajectory_panels(
                 .set_index("date")
                 .reindex(DATES)
             )
-            axis.plot(date_x, group[value_column], marker="o", label=treatment)
-            axis.fill_between(date_x, group["lower_95"], group["upper_95"], alpha=0.09)
+            estimate_x = date_x + treatment_offsets[treatment]
+            axis.errorbar(
+                estimate_x,
+                group[value_column],
+                yerr=np.vstack(
+                    [
+                        group[value_column] - group["lower_95"],
+                        group["upper_95"] - group[value_column],
+                    ]
+                ),
+                marker="o",
+                linestyle="none",
+                color=treatment_colors[treatment],
+                markerfacecolor=(
+                    "white" if treatment == "M0" else treatment_colors[treatment]
+                ),
+                markeredgecolor=treatment_colors[treatment],
+                capsize=ERRORBAR_CAPSIZE,
+                elinewidth=INTERVAL_LINEWIDTH,
+                markersize=MARKER_SIZE,
+                label=treatment,
+            )
         if reference is not None:
-            axis.axhline(reference, linestyle="--", linewidth=1.0)
-        axis.set_xticks(date_x, ["16 sep.", "20 oct.", "12 nov."])
-        axis.set_title(sector)
-        axis.set_xlabel("Fecha")
+            axis.axhline(
+                reference,
+                linestyle="--",
+                linewidth=REFERENCE_LINEWIDTH,
+            )
+        for date_position in date_x:
+            for treatment in TREATMENTS:
+                axis.text(
+                    date_position + treatment_offsets[treatment],
+                    -0.035,
+                    treatment,
+                    transform=axis.get_xaxis_transform(),
+                    ha="center",
+                    va="top",
+                    fontsize=8.5,
+                    color="0.38",
+                    clip_on=False,
+                )
+        axis.set_xticks(date_x, ["16 sep", "20 oct", "12 nov"])
+        axis.tick_params(axis="x", which="major", pad=25, length=0)
+        axis.set_title(sector.upper())
+        axis.set_xlabel("")
         axis.grid(alpha=0.22)
     axes[0].set_ylabel(y_label)
-    axes[1].legend(ncol=2, loc=legend_location)
 
 
 def plot_targeted_contrast_panels(
     axes: Any,
     display_contrasts: pd.DataFrame,
+    *,
+    color: str,
 ) -> None:
     for axis, variable in zip(axes, ["Biomasa aérea", "Concentración de N"]):
         group = display_contrasts.loc[
@@ -1114,10 +1226,16 @@ def plot_targeted_contrast_panels(
         low = group["lower_95"].to_numpy()
         high = group["upper_95"].to_numpy()
         labels = [f"{s} — {d}" for s, d in zip(group["sector"], group["date"])]
-        axis.errorbar(
-            med, y, xerr=np.vstack([med - low, high - med]), fmt="o", capsize=4
-        )
-        axis.axvline(0, linewidth=1.0)
+        for estimate, lower, upper, y_position in zip(med, low, high, y, strict=True):
+            plot_horizontal_interval(
+                axis,
+                estimate=float(estimate),
+                lower=float(lower),
+                upper=float(upper),
+                y=float(y_position),
+                color=color,
+            )
+        axis.axvline(0, linewidth=REFERENCE_LINEWIDTH)
         axis.set_yticks(y, labels)
         axis.grid(axis="x", alpha=0.22)
         axis.set_title(variable)
@@ -1143,45 +1261,68 @@ def make_figures(
     model_b_states: pd.DataFrame,
     reconstruction_null: pd.DataFrame,
 ) -> None:
-    plt.rcParams.update(
-        {
-            "figure.dpi": 120,
-            "font.size": 10,
-            "axes.titlesize": 12,
-            "axes.labelsize": 10,
-            "legend.fontsize": 9,
-        }
-    )
+    palette = apply_plot_theme()
+    treatment_colors = dict(zip(TREATMENTS, palette[: len(TREATMENTS)], strict=True))
 
     # 1. Observed yield + corrected posterior means.
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.2), sharey=True)
     plot_observed_yield_panels(
         axes,
         yield_data=yield_data,
         treatment_means=treatment_means,
+        treatment_colors=treatment_colors,
     )
     axes[0].set_ylabel("Rendimiento de semilla limpia (kg/ha)")
-    axes[1].legend(loc="lower left")
-    fig.suptitle("Rendimiento observado y estimación posterior corregida")
-    fig.tight_layout()
+    handles, labels = axes[1].get_legend_handles_labels()
+    add_figure_header(
+        fig,
+        "Rendimiento observado y estimación posterior corregida",
+        subtitle=(
+            "Puntos claros: parcelas observadas. Círculos y barras: media posterior "
+            "e intervalo creíble del 95 %."
+        ),
+    )
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.83))
+    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.15, top=0.70, wspace=0.12)
     save_figure(fig, "01_yield_observed_posterior")
 
     # 2. Practical-margin sensitivity by prior.
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.6), sharey=True)
-    plot_margin_panels(axes, margins)
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.2), sharey=True)
+    plot_margin_panels(
+        axes,
+        margins,
+        principal_color=palette[3],
+    )
     axes[0].set_ylabel("P(rango M1–M5 > δ | datos)")
-    axes[1].legend(loc="upper right")
-    fig.suptitle("La conclusión depende del margen práctico y de la regularización")
-    fig.tight_layout()
+    add_figure_header(
+        fig,
+        "La conclusión depende del margen práctico y de la regularización",
+        subtitle=(
+            "Curva principal destacada; las tres curvas grises son sensibilidades "
+            "alternativas. La línea vertical marca 100 kg ha⁻¹."
+        ),
+    )
+    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.15, top=0.76, wspace=0.12)
     save_figure(fig, "02_margin_prior_sensitivity")
 
     # 3. Near-optimal probabilities under the primary prior.
     primary_ranks = ranks.loc[ranks["specification"].eq("Principal")].copy()
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharey=True)
-    plot_near_optimal_panels(axes, primary_ranks)
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.0), sharey=True)
+    plot_near_optimal_panels(
+        axes,
+        primary_ranks,
+        treatment_colors=treatment_colors,
+    )
     axes[0].set_ylabel("P(a ≤100 kg/ha del mejor | datos)")
-    fig.suptitle("Probabilidad de rendimiento prácticamente cercano al mejor")
-    fig.tight_layout()
+    add_figure_header(
+        fig,
+        "Probabilidad de rendimiento prácticamente cercano al mejor",
+        subtitle=(
+            "Probabilidad posterior de quedar a no más de 100 kg ha⁻¹ del mejor "
+            "calendario fertilizado."
+        ),
+    )
+    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.15, top=0.76, wspace=0.12)
     save_figure(fig, "03_near_optimal_probabilities")
 
     # 4. Early-late yield contrasts and sector difference.
@@ -1193,24 +1334,39 @@ def make_figures(
         primary_estimands,
         sector_comparison,
     )
-    fig, axis = plt.subplots(figsize=(8.5, 4.2))
+    fig, axis = plt.subplots(figsize=(8.8, 4.8))
     y = np.arange(len(labels))
     med = np.array([item[0] for item in values])
     low = np.array([item[1] for item in values])
     high = np.array([item[2] for item in values])
-    axis.errorbar(med, y, xerr=np.vstack([med - low, high - med]), fmt="o", capsize=4)
-    axis.axvline(0.0, linewidth=1.0)
-    axis.axvline(100.0, linestyle="--", linewidth=0.9)
-    axis.axvline(-100.0, linestyle="--", linewidth=0.9)
+    for estimate, lower, upper, y_position in zip(med, low, high, y, strict=True):
+        plot_horizontal_interval(
+            axis,
+            estimate=float(estimate),
+            lower=float(lower),
+            upper=float(upper),
+            y=float(y_position),
+            color=palette[1],
+        )
+    axis.axvline(0.0, linewidth=REFERENCE_LINEWIDTH)
+    axis.axvline(100.0, linestyle="--", linewidth=REFERENCE_LINEWIDTH)
+    axis.axvline(-100.0, linestyle="--", linewidth=REFERENCE_LINEWIDTH)
     axis.set_yticks(y, labels)
     axis.set_xlabel("Contraste de rendimiento (kg/ha)")
-    axis.set_title("Tempranos M1–M2 versus tardíos M4–M5")
     axis.grid(axis="x", alpha=0.22)
-    fig.tight_layout()
+    add_figure_header(
+        fig,
+        "Tempranos M1–M2 versus tardíos M4–M5",
+        subtitle=(
+            "Mediana posterior e intervalo creíble del 95 %; las líneas punteadas "
+            "marcan ±100 kg ha⁻¹."
+        ),
+    )
+    fig.subplots_adjust(left=0.19, right=0.98, bottom=0.17, top=0.75)
     save_figure(fig, "04_early_late_sector_contrast")
 
     # 5. Leave-one-block-out sensitivity.
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.4), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.0), sharey=True)
     plot_leave_one_out_panels(
         axes,
         leave_one_out=leave_one_out,
@@ -1218,47 +1374,82 @@ def make_figures(
     )
     axes[0].set_ylabel("P(rango M1–M5 >100 kg/ha)")
     axes[1].legend(loc="best")
-    fig.suptitle("Sensibilidad al dejar afuera un bloque")
-    fig.tight_layout()
+    add_figure_header(
+        fig,
+        "Sensibilidad al dejar afuera un bloque",
+        subtitle=(
+            "Cada punto omite un bloque; la línea punteada muestra el ajuste con "
+            "todos los bloques."
+        ),
+    )
+    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.15, top=0.76, wspace=0.12)
     save_figure(fig, "05_leave_one_block_out")
 
     # 6. Posterior predictive classical p-values.
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.4), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.2), sharey=True)
     plot_ppc_panels(axes, ppc_draws)
     axes[0].set_ylabel("Densidad")
-    axes[1].legend(loc="upper right")
-    fig.suptitle("Qué produciría nuevamente el análisis convencional")
-    fig.tight_layout()
+    handles, labels = axes[1].get_legend_handles_labels()
+    add_figure_header(
+        fig,
+        "Qué produciría nuevamente el análisis convencional",
+        subtitle=(
+            "Distribución posterior predictiva del p del ANOVA M1–M5; se muestran "
+            "el umbral 0,05 y el p observado."
+        ),
+    )
+    fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.83),
+        ncol=2,
+    )
+    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.17, top=0.69, wspace=0.12)
     save_figure(fig, "06_posterior_predictive_anova")
 
     # 7. Longitudinal biomass trajectories.
     biomass = trajectories.loc[trajectories["variable"].eq("Biomasa aérea")]
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5.0), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.7), sharey=True)
     plot_trajectory_panels(
         axes,
         biomass,
         value_column="median",
         y_label="Biomasa típica posterior (kg MS/ha)",
-        legend_location="upper left",
+        treatment_colors=treatment_colors,
     )
-    fig.suptitle(
-        "Trayectorias posteriores de biomasa: separación temprana y convergencia parcial"
+    add_figure_header(
+        fig,
+        "Biomasa posterior en las tres fechas de muestreo",
+        subtitle="Mediana posterior e intervalo creíble del 95 % para cada calendario.",
     )
-    fig.tight_layout()
+    add_figure_note(
+        fig,
+        "Las fechas se muestran como categorías equidistantes; los puntos no se conectan.",
+    )
+    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.23, top=0.76, wspace=0.12)
     save_figure(fig, "07_longitudinal_biomass")
 
     # 8. Longitudinal N concentration trajectories.
     n_conc = trajectories.loc[trajectories["variable"].eq("Concentración de N")]
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5.0), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.7), sharey=True)
     plot_trajectory_panels(
         axes,
         n_conc,
         value_column="median",
         y_label="Concentración típica posterior de N (%)",
-        legend_location="upper right",
+        treatment_colors=treatment_colors,
     )
-    fig.suptitle("El mayor estado nitrogenado se desplaza hacia calendarios tardíos")
-    fig.tight_layout()
+    add_figure_header(
+        fig,
+        "Concentración de N posterior en las tres fechas de muestreo",
+        subtitle="Mediana posterior e intervalo creíble del 95 % para cada calendario.",
+    )
+    add_figure_note(
+        fig,
+        "Las fechas se muestran como categorías equidistantes; los puntos no se conectan.",
+    )
+    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.23, top=0.76, wspace=0.12)
     save_figure(fig, "08_longitudinal_n_concentration")
 
     # 9. Targeted longitudinal contrasts.
@@ -1279,55 +1470,100 @@ def make_figures(
         + " — "
         + display_contrasts["date"]
     )
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5.2))
-    plot_targeted_contrast_panels(axes, display_contrasts)
-    fig.suptitle("Contrastes temporales dirigidos por hipótesis")
-    fig.tight_layout()
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.7))
+    plot_targeted_contrast_panels(
+        axes,
+        display_contrasts,
+        color=palette[1],
+    )
+    add_figure_header(
+        fig,
+        "Contrastes temporales dirigidos por hipótesis",
+        subtitle=(
+            "Mediana posterior e intervalo creíble del 95 %; la línea vertical "
+            "marca una diferencia nula."
+        ),
+    )
+    fig.subplots_adjust(left=0.13, right=0.98, bottom=0.17, top=0.76, wspace=0.42)
     save_figure(fig, "09_targeted_longitudinal_contrasts")
 
     # 10. Model B NNI trajectories (exploratory support).
     nni = model_b_states.loc[model_b_states["variable"].eq("nni_revised")]
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5.0), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.7), sharey=True)
     plot_trajectory_panels(
         axes,
         nni,
         value_column="posterior_median",
         y_label="INN revisado latente",
-        legend_location="upper right",
+        treatment_colors=treatment_colors,
         reference=1.0,
     )
-    fig.suptitle("Modelo B: trayectorias latentes del INN (resultado de apoyo)")
-    fig.tight_layout()
+    add_figure_header(
+        fig,
+        "Modelo B: INN latente en las tres fechas de muestreo",
+        subtitle=(
+            "Mediana posterior e intervalo creíble del 95 %; la línea horizontal "
+            "marca INN = 1."
+        ),
+    )
+    add_figure_note(
+        fig,
+        "Resultado de apoyo. Las fechas son categorías equidistantes y los puntos no se conectan.",
+    )
+    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.23, top=0.76, wspace=0.12)
     save_figure(fig, "10_model_b_nni")
 
     # 11. Reconstruction-null observed vs null interval.
     table = reconstruction_null.copy().iloc[::-1].reset_index(drop=True)
-    fig, axis = plt.subplots(figsize=(10.2, 4.6))
+    fig, axis = plt.subplots(figsize=(10.4, 5.2))
     y = np.arange(len(table))
     null_median = table["null_median"].to_numpy()
     null_low = table["null_lower_95"].to_numpy()
     null_high = table["null_upper_95"].to_numpy()
     observed = table["observed_correlation"].to_numpy()
-    axis.errorbar(
-        null_median,
-        y,
-        xerr=np.vstack([null_median - null_low, null_high - null_median]),
-        fmt="o",
-        capsize=4,
-        label="Nulo de reconstrucción: mediana e IC 95 %",
-    )
+    null_y = y + 0.09
+    observed_y = y - 0.09
+    for index, (estimate, lower, upper, y_position) in enumerate(
+        zip(null_median, null_low, null_high, null_y, strict=True)
+    ):
+        plot_horizontal_interval(
+            axis,
+            estimate=float(estimate),
+            lower=float(lower),
+            upper=float(upper),
+            y=float(y_position),
+            color=palette[1],
+            label=("Nulo de reconstrucción: mediana e IC 95 %" if index == 0 else None),
+        )
     axis.scatter(
-        observed, y, marker="x", s=80, linewidths=2.0, label="Correlación observada"
+        observed,
+        observed_y,
+        marker="o",
+        s=62,
+        facecolors="white",
+        edgecolors="0.20",
+        linewidths=DATA_LINEWIDTH,
+        zorder=4,
+        label="Correlación observada",
     )
-    axis.axvline(0.0, linewidth=0.8)
+    axis.axvline(0.0, linewidth=REFERENCE_LINEWIDTH)
     axis.set_yticks(y, table["pattern"])
     axis.set_xlabel("Correlación panojas–semillas estimadas por panoja")
-    axis.set_title(
-        "La asociación inversa observada es ordinaria bajo la reconstrucción matemática"
-    )
     axis.grid(axis="x", alpha=0.22)
-    axis.legend(loc="upper right")
-    fig.tight_layout()
+    axis.legend(
+        loc="lower right",
+        bbox_to_anchor=(1.0, 1.02),
+        ncol=2,
+    )
+    add_figure_header(
+        fig,
+        "Asociación observada frente al nulo de reconstrucción",
+        subtitle=(
+            "Círculos llenos y barras: mediana e intervalo nulo del 95 %. "
+            "Círculos vacíos: correlación observada."
+        ),
+    )
+    fig.subplots_adjust(left=0.28, right=0.98, bottom=0.17, top=0.76)
     save_figure(fig, "11_reconstruction_null")
 
 
