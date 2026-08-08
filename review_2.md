@@ -42,21 +42,21 @@ Además, el manejo general solo documenta en la tesis la aplicación de abril. E
 
 Con 40 % de N, representan aproximadamente:
 
-[
+$$
 60+52+52=164\ \mathrm{kg\ N\ ha^{-1}}
-]
+$$
 
 comunes a todo el semillero. Por tanto:
 
-[
+$$
 M0 \approx 164\ \mathrm{kg\ N\ ha^{-1}}
-]
+$$
 
 y
 
-[
+$$
 M1\text{–}M5 \approx 164+200=364\ \mathrm{kg\ N\ ha^{-1}}.
-]
+$$
 
 La tesis actual menciona la fertilización de abril y el cierre del 1.º de julio, pero omite las fertilizaciones generales de julio y agosto.
 
@@ -173,17 +173,17 @@ El motivo es sencillo: comparar un resultado significativo en septiembre con uno
 
 Por ejemplo:
 
-[
+$$
 p_{\mathrm{sep}}<0{,}05
 \quad\text{y}\quad
 p_{\mathrm{oct}}>0{,}05
-]
+$$
 
 no implica:
 
-[
+$$
 \Delta_{\mathrm{sep}}\neq\Delta_{\mathrm{oct}}.
-]
+$$
 
 La diferencia puede haber disminuido, pero también puede haberse mantenido con mayor variabilidad o menor precisión.
 
@@ -220,13 +220,13 @@ Eso conserva casi toda la historia agronómica sin afirmar algo que el análisis
 
 La tesis ya reconoce correctamente que semillas por panoja se calculó como:
 
-[
+$$
 \widehat S
 ==========
 
 \frac{1000,Y}
 {W_{1000}P},
-]
+$$
 
 donde:
 
@@ -437,14 +437,14 @@ por:
 
 La fórmula utilizada es:
 
-[
+$$
 Q_t
 ===
 
 \text{biomasa aérea}_t
 \times
 \text{concentración de N}_t.
-]
+$$
 
 La propia tesis define el resultado como “cantidad de nitrógeno presente en la biomasa aérea”.
 
@@ -543,11 +543,11 @@ Estos no cambian las conclusiones, pero son correcciones fáciles.
 * Usar `p < 0,0001`, nunca `p = 0,0000`.
 * Las ecuaciones del INN deberían usar consistentemente:
 
-[
+$$
 W^{-0,42}
 \qquad\text{y}\qquad
 W^{-0,32}
-]
+$$
 
 en lugar de mezclar `W^(−0,42)` con superíndices que en alguna tabla aparecen como `W⁻⁰·⁴²`.
 
