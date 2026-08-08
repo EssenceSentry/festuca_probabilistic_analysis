@@ -106,6 +106,38 @@ Esa combinación es una conclusión científicamente útil. No hace falta fabric
 
 ---
 
+## 3.1 Lectura explícita: qué sostener y qué atenuar en la tesis
+
+Esta revisión distingue con precisión lo que el análisis permite afirmar con mayor fuerza y lo que debe redactarse con cautela para no sobrepasar el soporte inferencial.
+
+### 3.1.1 Afirmaciones que pueden sostenerse con más fuerza (si se textualizan en resultados/discusión)
+
+- La tesis sí puede afirmar con más fuerza que el tratamiento diferencial **sí muestra una respuesta clara al N adicional**: el bloque M1–M5 vs M0 fue consistente y grande en rendimiento, y esto es estable al mantener la celda faltante como omisión principal.
+- El diseño permite afirmar que el contraste central “dos preguntas separadas” (respuesta al N adicional vs comparación entre calendarios con misma dosis experimental) fue tratado correctamente y debe conservarse como eje de narrativa.
+- Hay soporte explícito para afirmar que **M1–M5 cambian la trayectoria temporal de estado del cultivo** en parte de las variables, pero no necesariamente en todas; el análisis longitudinal muestra diferencias más sólidas para N en biomasa (sobre todo riego) que para biomasa en la escala original.
+- Puede reforzarse que en septiembre M5 no está completamente comparable a M1–M4 en dosis acumulada experimental, porque aún llevaba una sola aplicación.
+- El marco probabilístico puede sostener más claramente la diferencia entre “no hay ganador” y “equivalencia”: ambos conceptos no son equivalentes en los resultados actuales.
+- Puede afirmarse con mayor contundencia que el componente de semillas por panoja usado es una **variable reconstruida** y que, por sí solo, no prueba mecanismo biológico adicional al rendimiento/panojas.
+- Puede declararse explícitamente que el efecto “causal del riego” **no es estimable** con generalidad por falta de replicación del régimen hídrico.
+
+### 3.1.2 Afirmaciones que hoy deben atenuarse o reformularse
+
+- “Convergencia” o “compensación” no pueden presentarse como conclusiones inferenciales fuertes; los contrastes de fecha aislados no demuestran cambio de forma temporal por calendario, y la compensación de semillas por panoja no se demostró.
+- p > 0,05 no puede expresarse como equivalencia, ni como “ausencia de diferencias agronómicas”; al menos con n = 4 hay baja potencia y márgenes de precisión limitados.
+- El lenguaje que sugiere “captación/absorción” de N debe restringirse a stock o N en biomasa en fecha de muestreo, porque el muestreo es destructivo y puntual.
+- EAN y productividad aparente del agua, en este material, deben ir como métricas derivadas del rendimiento (exploratorias o descriptivas), no como pruebas causales independientes.
+- Las correlaciones entre tratamientos deben separarse de la pregunta mecanística; incluirlas como prueba de mecanismo solo debilita la tesis si se mantiene la redacción causal.
+
+### 3.1.3 Traducción práctica para el texto de la tesis
+
+Para evitar que el texto oscile entre “demasiado fuerte” y “demasiado suave”, conviene fijar una plantilla de redacción:
+
+- **Resultado primario robusto:** “M0 vs calendarios fertilizados con dosis adicional”.
+- **Resultado secundario longitudinal:** “evidencia de diferencias de trayectoria en variables nitrogenadas, con soporte desigual por variable/sector”.
+- **Resultado no concluyente:** “no se identificó un calendario superior; tampoco se demostró equivalencia”.
+- **Resultado a evitar como causal:** “compensación entre componentes” (sustituir por “patrones concomitantes no independientes o hipótesis no probada”).
+- **Resultado condicional al contexto:** “patrón en los dos sectores observados no constituye efecto causal generalizable del riego”.
+
 ## 4. Revisión científica del diseño y del constructo experimental
 
 ### 4.1 El factor experimental no es simplemente “momento de aplicación”
