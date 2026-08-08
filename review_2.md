@@ -221,11 +221,7 @@ Eso conserva casi toda la historia agronómica sin afirmar algo que el análisis
 La tesis ya reconoce correctamente que semillas por panoja se calculó como:
 
 $$
-\widehat S
-==========
-
-\frac{1000,Y}
-{W_{1000}P},
+\widehat{S}=\frac{1000\,Y}{W_{1000}P}
 $$
 
 donde:
