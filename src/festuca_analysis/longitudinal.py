@@ -64,6 +64,8 @@ class LongitudinalNotebook:
         dry_matter_policy: Literal["recorded", "ratio", "exclude"] = "recorded",
         export_results: bool = True,
         export_figures: bool = True,
+        figure_profile: Literal["standalone", "thesis"] = "standalone",
+        print_figure_json: bool = False,
     ) -> None:
         root = (project_root or Path.cwd()).resolve()
         self._steps = _analysis_steps(
@@ -71,6 +73,8 @@ class LongitudinalNotebook:
             dry_matter_policy=dry_matter_policy,
             export_results=export_results,
             export_figures=export_figures,
+            figure_profile=figure_profile,
+            print_figure_json=print_figure_json,
         )
         self._completed: list[str] = []
 
@@ -218,6 +222,8 @@ def _analysis_steps(
     dry_matter_policy: Literal["recorded", "ratio", "exclude"],
     export_results: bool,
     export_figures: bool,
+    figure_profile: Literal["standalone", "thesis"],
+    print_figure_json: bool,
 ) -> Iterator[str]:
 
     # Notebook step: configuration
@@ -226,7 +232,7 @@ def _analysis_steps(
     from collections.abc import Sequence
     from dataclasses import dataclass
     from importlib import import_module
-    from itertools import combinations
+    from itertools import combinations, pairwise
     from pathlib import Path
     from typing import Any, cast
 
@@ -243,8 +249,7 @@ def _analysis_steps(
         Markdown,
         display,  # pyright: ignore[reportUnknownVariableType]
     )
-    from matplotlib.lines import Line2D
-    from matplotlib.patches import Patch
+    from matplotlib.colors import to_rgb
     from scipy import stats
 
     from festuca_analysis.plotting import (
@@ -254,9 +259,7 @@ def _analysis_steps(
         INTERVAL_LINEWIDTH,
         MARKER_SIZE,
         REFERENCE_LINEWIDTH,
-        SECONDARY_LINEWIDTH,
-        add_figure_header,
-        add_figure_note,
+        FigureExporter,
         apply_plot_theme,
         plot_horizontal_interval,
     )
@@ -299,20 +302,20 @@ def _analysis_steps(
     FIGURE_DPI = 300
 
     PLOT_PALETTE = apply_plot_theme()
+    figure_exporter = FigureExporter(
+        FIGURES_DIR,
+        profile=figure_profile,
+        dpi=FIGURE_DPI,
+        print_json=print_figure_json,
+    )
+    add_figure_header = figure_exporter.add_header
+    add_figure_note = figure_exporter.add_note
 
     def save_figure(fig: Any, filename_stem: str) -> None:
         if not EXPORT_FIGURES:
+            figure_exporter.discard(fig)
             return
-        FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-        fig.savefig(
-            FIGURES_DIR / f"{filename_stem}.png",
-            dpi=FIGURE_DPI,
-            bbox_inches="tight",
-        )
-        fig.savefig(
-            FIGURES_DIR / f"{filename_stem}.pdf",
-            bbox_inches="tight",
-        )
+        figure_exporter.save(fig, filename_stem)
 
     TREATMENTS = ["M0", "M1", "M2", "M3", "M4", "M5"]
     FERTILIZED = ["M1", "M2", "M3", "M4", "M5"]
@@ -813,15 +816,28 @@ def _analysis_steps(
     # Notebook step: schedule
     display_output(data.schedule)
 
-    def plot_schedule_and_cumulative_n() -> None:
+    def plot_schedule_and_cumulative_n(
+        *,
+        view_start: pd.Timestamp,
+        view_end: pd.Timestamp,
+        filename_stem: str,
+        title: str,
+        subtitle: str,
+        figure_height: float,
+        row_height: float,
+    ) -> None:
         study_start = pd.Timestamp("2025-04-01")
         study_end = pd.Timestamp("2025-11-30")
+        if not study_start <= view_start < view_end <= study_end:
+            raise ValueError(
+                "La ventana del cronograma debe quedar dentro del estudio."
+            )
         common_n_periods = [
             (pd.Timestamp(start), pd.Timestamp(end), dose)
             for start, end, dose in COMMON_N_APPLICATIONS
         ]
         common_n_uncertain_periods = [
-            (start, end, dose, f"≈{dose:.0f} común")
+            (start, end, dose, rf"$\approx${dose:.0f} común")
             for start, end, dose in common_n_periods
             if start != end
         ]
@@ -833,12 +849,13 @@ def _analysis_steps(
                 "Se esperaba una aplicación común fechada el 1.º de julio."
             )
         grazing_closure = next(iter(exact_common_events))
-        exact_common_n = exact_common_events[grazing_closure]
         common_n_total = COMMON_N_TOTAL_KG_HA
         fertilized_n_total = common_n_total + EXPERIMENTAL_N_TOTAL_KG_HA
-        row_height = 0.66
         dose_scale = row_height / fertilized_n_total
         common_color = "0.58"
+        common_fill_opacity = 0.18
+        uncertain_fill_opacity = 0.28
+        common_linestyle = (0, (2.2, 2.4))
         uncertainty_color = "0.62"
         separator_color = "0.82"
         row_positions = {
@@ -846,69 +863,41 @@ def _analysis_steps(
             for index, treatment in enumerate(TREATMENTS)
         }
 
-        def common_ramp_n(moment: pd.Timestamp) -> float:
-            accumulated = 0.0
-            for start, end, dose, _label in common_n_uncertain_periods:
-                if moment >= end:
-                    accumulated += dose
-                elif moment > start:
-                    elapsed = (moment - start) / (end - start)
-                    accumulated += dose * float(elapsed)
-            return accumulated
+        def is_uncertain(moment: pd.Timestamp) -> bool:
+            return any(
+                start <= moment < end
+                for start, end, _dose, _label in common_n_uncertain_periods
+            )
 
-        def treatment_path(
+        def certain_common_n(moment: pd.Timestamp) -> float:
+            uncertain_n = sum(
+                dose
+                for _start, end, dose, _label in common_n_uncertain_periods
+                if moment >= end
+            )
+            exact_n = sum(
+                dose for date, dose in exact_common_events.items() if moment >= date
+            )
+            return float(uncertain_n + exact_n)
+
+        def experimental_n(
+            moment: pd.Timestamp,
             application_dates: list[pd.Timestamp],
-        ) -> tuple[list[pd.Timestamp], np.ndarray, np.ndarray]:
-            exact_events: dict[pd.Timestamp, tuple[float, float]] = {
-                date: (dose, 0.0) for date, dose in exact_common_events.items()
-            }
-            for application_date in application_dates:
-                common_delta, experimental_delta = exact_events.get(
-                    application_date, (0.0, 0.0)
-                )
-                exact_events[application_date] = (
-                    common_delta,
-                    experimental_delta + 100.0,
-                )
+        ) -> float:
+            return 100.0 * sum(moment >= date for date in application_dates)
 
-            knots = {
-                study_start,
-                study_end,
-                *[start for start, _end, _dose, _label in common_n_uncertain_periods],
-                *[end for _start, end, _dose, _label in common_n_uncertain_periods],
-                *exact_events,
-            }
-            ordered_knots = sorted(knots)
-            x_path: list[pd.Timestamp] = []
-            common_path: list[float] = []
-            total_path: list[float] = []
-            exact_common_accumulated = 0.0
-            experimental_accumulated = 0.0
+        def fill_color(color: Any, opacity: float) -> tuple[float, float, float]:
+            red, green, blue = to_rgb(color)
+            return (
+                1.0 - opacity * (1.0 - red),
+                1.0 - opacity * (1.0 - green),
+                1.0 - opacity * (1.0 - blue),
+            )
 
-            for moment in ordered_knots:
-                common_before = common_ramp_n(moment) + exact_common_accumulated
-                x_path.append(moment)
-                common_path.append(common_before)
-                total_path.append(common_before + experimental_accumulated)
+        common_fill_color = fill_color(common_color, common_fill_opacity)
+        uncertain_common_fill_color = fill_color(common_color, uncertain_fill_opacity)
 
-                common_delta, experimental_delta = exact_events.get(moment, (0.0, 0.0))
-                if common_delta or experimental_delta:
-                    exact_common_accumulated += common_delta
-                    experimental_accumulated += experimental_delta
-                    x_path.append(moment)
-                    common_path.append(common_ramp_n(moment) + exact_common_accumulated)
-                    total_path.append(
-                        common_ramp_n(moment)
-                        + exact_common_accumulated
-                        + experimental_accumulated
-                    )
-
-            return x_path, np.asarray(common_path), np.asarray(total_path)
-
-        fig, ax = mpl.subplots(figsize=(13.6, 8.2))
-
-        for start, end, _dose, _label in common_n_uncertain_periods:
-            ax.axvspan(start, end, color="0.88", alpha=0.34, linewidth=0, zorder=0)
+        fig, ax = mpl.subplots(figsize=(13.6, figure_height))
 
         for boundary in [0.83, 1.83, 2.83, 3.83, 4.83]:
             ax.axhline(
@@ -951,75 +940,150 @@ def _analysis_steps(
                     pd.Timestamp(row["second_application"]),
                 ]
             )
-            x_path, common_path, total_path = treatment_path(application_dates)
-            scaled_common = baseline + common_path * dose_scale
-            scaled_total = baseline + total_path * dose_scale
             line_color = (
                 common_color if treatment == "M0" else treatment_colors[treatment]
             )
 
-            ax.fill_between(
-                x_path,
-                baseline,
-                scaled_common,
-                color=common_color,
-                alpha=0.29,
-                linewidth=0,
-                zorder=2,
+            exact_event_dates = {*exact_common_events, *application_dates}
+            knots = sorted(
+                {
+                    study_start,
+                    study_end,
+                    *[
+                        start
+                        for start, _end, _dose, _label in common_n_uncertain_periods
+                    ],
+                    *[end for _start, end, _dose, _label in common_n_uncertain_periods],
+                    *exact_event_dates,
+                }
             )
-            if treatment != "M0":
+            for segment_start, segment_end in pairwise(knots):
+                midpoint = segment_start + (segment_end - segment_start) / 2
+                if is_uncertain(midpoint):
+                    continue
+                common_n = certain_common_n(midpoint)
+                experimental_total = experimental_n(midpoint, application_dates)
+                total_n = common_n + experimental_total
+                scaled_common = baseline + common_n * dose_scale
+                scaled_total = baseline + total_n * dose_scale
                 ax.fill_between(
-                    x_path,
+                    [segment_start, segment_end],
+                    baseline,
                     scaled_common,
-                    scaled_total,
-                    color=line_color,
-                    alpha=0.11,
-                    linewidth=0,
+                    color=common_fill_color,
+                    edgecolor=common_fill_color,
+                    linewidth=DATA_LINEWIDTH,
                     zorder=2,
                 )
-            ax.plot(
-                x_path,
-                scaled_total,
-                color=line_color,
-                linewidth=DATA_LINEWIDTH,
-                solid_capstyle="round",
-                zorder=4,
-            )
+                before_first_experimental = (
+                    treatment != "M0" and experimental_total == 0
+                )
+                ax.hlines(
+                    scaled_total,
+                    segment_start,
+                    segment_end,
+                    color=(common_color if before_first_experimental else line_color),
+                    linewidth=DATA_LINEWIDTH,
+                    linestyles=(
+                        common_linestyle
+                        if treatment == "M0" or before_first_experimental
+                        else "solid"
+                    ),
+                    zorder=4,
+                )
 
-            for index in range(len(x_path) - 1):
-                start = x_path[index]
-                end = x_path[index + 1]
-                if start == end:
-                    continue
-                midpoint = start + (end - start) / 2
-                if any(
-                    uncertain_start <= midpoint <= uncertain_end
-                    for uncertain_start, uncertain_end, _dose, _label in common_n_uncertain_periods
-                ):
-                    ax.plot(
-                        [start, end],
-                        [scaled_total[index], scaled_total[index + 1]],
-                        color=uncertainty_color,
-                        linestyle=(0, (2.1, 2.3)),
-                        linewidth=SECONDARY_LINEWIDTH,
-                        zorder=5,
+            for start, end, uncertain_dose, _label in common_n_uncertain_periods:
+                split_points = [
+                    start,
+                    *sorted(date for date in exact_event_dates if start < date < end),
+                    end,
+                ]
+                for segment_start, segment_end in pairwise(split_points):
+                    midpoint = segment_start + (segment_end - segment_start) / 2
+                    common_lower_n = certain_common_n(midpoint)
+                    ax.fill_between(
+                        [segment_start, segment_end],
+                        baseline,
+                        baseline + common_lower_n * dose_scale,
+                        color=common_fill_color,
+                        edgecolor=common_fill_color,
+                        linewidth=DATA_LINEWIDTH,
+                        zorder=2,
+                    )
+                    experimental_total = experimental_n(midpoint, application_dates)
+                    lower_n = common_lower_n + experimental_total
+                    upper_n = lower_n + uncertain_dose
+                    rectangle_is_colored = experimental_total > 0
+                    rectangle_color = (
+                        fill_color(line_color, uncertain_fill_opacity)
+                        if rectangle_is_colored
+                        else uncertain_common_fill_color
+                    )
+                    ax.fill_between(
+                        [segment_start, segment_end],
+                        baseline + lower_n * dose_scale,
+                        baseline + upper_n * dose_scale,
+                        color=rectangle_color,
+                        linewidth=0,
+                        zorder=3,
+                    )
+                    ax.hlines(
+                        [
+                            baseline + lower_n * dose_scale,
+                            baseline + upper_n * dose_scale,
+                        ],
+                        segment_start,
+                        segment_end,
+                        color=rectangle_color,
+                        linewidth=DATA_LINEWIDTH,
+                        zorder=3.5,
                     )
 
-            july_common_before_n = common_ramp_n(grazing_closure)
-            july_common_before = baseline + july_common_before_n * dose_scale
-            july_common_after = (
-                baseline + (july_common_before_n + exact_common_n) * dose_scale
-            )
-            ax.vlines(
-                grazing_closure,
-                july_common_before,
-                july_common_after,
-                color=common_color,
-                linewidth=DATA_LINEWIDTH,
-                zorder=6,
-            )
+            event_doses = {
+                date: (dose, 0.0) for date, dose in exact_common_events.items()
+            }
+            for application_date in application_dates:
+                common_delta, experimental_delta = event_doses.get(
+                    application_date, (0.0, 0.0)
+                )
+                event_doses[application_date] = (
+                    common_delta,
+                    experimental_delta + 100.0,
+                )
+            one_nanosecond = pd.Timedelta(1, unit="ns")
+            for event_date, (common_delta, experimental_delta) in sorted(
+                event_doses.items()
+            ):
+                if is_uncertain(event_date):
+                    continue
+                before = event_date - one_nanosecond
+                total_before = certain_common_n(before) + experimental_n(
+                    before, application_dates
+                )
+                total_after = total_before + common_delta + experimental_delta
+                experimental_before = experimental_n(before, application_dates)
+                common_only_before_experimental = (
+                    treatment != "M0"
+                    and experimental_before == 0
+                    and experimental_delta == 0
+                )
+                ax.vlines(
+                    event_date,
+                    baseline + total_before * dose_scale,
+                    baseline + total_after * dose_scale,
+                    color=(
+                        common_color if common_only_before_experimental else line_color
+                    ),
+                    linewidth=DATA_LINEWIDTH,
+                    linestyles=(
+                        common_linestyle
+                        if treatment == "M0" or common_only_before_experimental
+                        else "solid"
+                    ),
+                    zorder=5,
+                )
 
-            label_x = study_start - pd.Timedelta(days=5)
+            label_x = view_start - pd.Timedelta(days=5)
             row_center = baseline + row_height / 2
             final_total = common_n_total if treatment == "M0" else fertilized_n_total
             ax.text(
@@ -1035,7 +1099,7 @@ def _analysis_steps(
             ax.text(
                 label_x,
                 row_center - 0.08,
-                f"≈{final_total:.0f} kg",
+                rf"$\approx${final_total:.0f} kg",
                 ha="right",
                 va="center",
                 fontsize=9.5,
@@ -1054,7 +1118,7 @@ def _analysis_steps(
 
             if treatment == "M0":
                 ax.text(
-                    pd.Timestamp("2025-04-03"),
+                    view_start + pd.Timedelta(days=2),
                     baseline + 0.52,
                     "sin N experimental adicional",
                     ha="left",
@@ -1064,6 +1128,8 @@ def _analysis_steps(
                 )
             else:
                 for application_date in application_dates:
+                    if not view_start <= application_date <= view_end:
+                        continue
                     ax.text(
                         application_date,
                         baseline - 0.055,
@@ -1074,38 +1140,62 @@ def _analysis_steps(
                         color="0.30",
                     )
 
-        month_ticks = pd.date_range(
-            "2025-04-01", "2025-11-01", freq="MS"
-        ) + pd.Timedelta(days=14)
-        month_labels = ["abr", "may", "jun", "jul", "ago", "sep", "oct", "nov"]
+        month_names = {
+            4: "abr",
+            5: "may",
+            6: "jun",
+            7: "jul",
+            8: "ago",
+            9: "sep",
+            10: "oct",
+            11: "nov",
+        }
+        month_starts = pd.date_range(
+            view_start,
+            view_end,
+            freq="MS",
+            inclusive="left",
+        )
+        month_ticks = month_starts + pd.Timedelta(days=14)
+        month_labels = [month_names[month] for month in month_starts.month]
         ax.set_xticks(month_ticks, month_labels)
-        ax.set_xlim(study_start, study_end)
-        ax.set_ylim(-0.55, 5.82)
+        ax.set_xlim(view_start, view_end)
+        ax.set_ylim(-0.55, 5.16 + row_height)
         ax.set_yticks([])
         ax.grid(False)
         ax.spines[["left", "right", "top"]].set_visible(False)
 
-        bottom_event_y = -0.37
+        event_transform = ax.get_xaxis_transform()
+        top_event_y = 1.035
         for start, end, _dose, label in common_n_uncertain_periods:
+            if end < view_start or start > view_end:
+                continue
             ax.text(
                 start + (end - start) / 2,
-                bottom_event_y,
-                label,
+                top_event_y,
+                f"{label}\nfecha no consignada",
                 ha="center",
-                va="top",
+                va="bottom",
                 fontsize=8.75,
                 color="0.48",
+                transform=event_transform,
+                clip_on=False,
             )
-        ax.text(
-            grazing_closure,
-            bottom_event_y,
-            "1 jul · +52 común\ncierre del pastoreo",
-            ha="center",
-            va="top",
-            fontsize=8.75,
-            color="0.38",
-        )
+        if view_start <= grazing_closure <= view_end:
+            ax.text(
+                grazing_closure,
+                top_event_y,
+                "1 jul · +52 común\ncierre del pastoreo",
+                ha="center",
+                va="bottom",
+                fontsize=8.75,
+                color="0.38",
+                transform=event_transform,
+                clip_on=False,
+            )
         for sample_date in DATES:
+            if not view_start <= sample_date <= view_end:
+                continue
             event_label = DATE_LABELS[sample_date]
             if sample_date == DATES[-1]:
                 event_label += "\nmuestreo y cosecha"
@@ -1113,68 +1203,61 @@ def _analysis_steps(
                 event_label += "\nmuestreo"
             ax.text(
                 sample_date,
-                bottom_event_y,
+                top_event_y,
                 event_label,
                 ha="center",
-                va="top",
+                va="bottom",
                 fontsize=8.75,
                 color="0.38",
+                transform=event_transform,
+                clip_on=False,
             )
-
-        legend_handles = [
-            Patch(
-                facecolor=common_color,
-                alpha=0.29,
-                edgecolor="none",
-                label="N común acumulado",
-            ),
-            Line2D(
-                [0],
-                [0],
-                color=PLOT_PALETTE[3],
-                linewidth=DATA_LINEWIDTH,
-                label="N total aplicado",
-            ),
-            Line2D(
-                [0],
-                [0],
-                color=uncertainty_color,
-                linestyle=(0, (2.1, 2.3)),
-                linewidth=SECONDARY_LINEWIDTH,
-                label="tramo con fecha común no consignada",
-            ),
-        ]
-        fig.legend(
-            handles=legend_handles,
-            loc="upper center",
-            bbox_to_anchor=(0.52, 0.885),
-            ncol=3,
-            columnspacing=2.0,
-            handlelength=2.3,
-        )
         add_figure_header(
             fig,
-            "Cronograma de aplicaciones y N aplicado acumulado por tratamiento",
-            subtitle=("común ≈164 + experimental (0 o 200) = ≈164–364 kg N ha⁻¹"),
+            title,
+            subtitle=subtitle,
         )
         add_figure_note(
             fig,
             (
-                "Las rampas ubican aplicaciones comunes dentro de intervalos con fecha no consignada; "
-                "no representan liberación gradual. Al 16 sep: M1–M4 ≈364 y M5 ≈264 kg N ha⁻¹."
+                "El sombreado gris muestra el N común mínimo acumulado. M0 y los tramos "
+                "previos a la primera aplicación experimental se trazan con una línea "
+                "gris punteada; luego comienza el color del tratamiento.\n"
+                "Los rectángulos muestran el rango pre–post cuando la fecha de una "
+                "aplicación común no fue consignada; la trayectoria acumulada se omite "
+                "en esos tramos. Sus límites inferior y superior se trazan con líneas "
+                "del mismo tono que el relleno. "
+                "Al 16 sep: M1–M4 ≈364 y M5 ≈264 kg N ha⁻¹."
             ),
         )
         fig.subplots_adjust(
             left=0.15,
             right=0.985,
-            bottom=0.145,
-            top=0.80,
+            bottom=0.12,
+            top=0.78,
         )
-        save_figure(fig, "figura_01_cronograma_y_n_acumulado")
+        save_figure(fig, filename_stem)
         mpl.show()
         mpl.close(fig)
 
-    plot_schedule_and_cumulative_n()
+    plot_schedule_and_cumulative_n(
+        view_start=pd.Timestamp("2025-04-01"),
+        view_end=pd.Timestamp("2025-11-30"),
+        filename_stem="figura_01_cronograma_y_n_acumulado",
+        title="Cronograma de aplicaciones y N aplicado acumulado por tratamiento",
+        subtitle="común ≈164 + experimental (0 o 200) = ≈164–364 kg N ha⁻¹",
+        figure_height=8.2,
+        row_height=0.66,
+    )
+    plot_schedule_and_cumulative_n(
+        view_start=pd.Timestamp("2025-06-01"),
+        view_end=pd.Timestamp("2025-10-31"),
+        filename_stem="figura_01b_zoom_aplicaciones_experimentales",
+        title="Aplicaciones experimentales y N acumulado: detalle junio–octubre",
+        subtitle="M1–M5: 2 × 100 kg N ha⁻¹ · aplicaciones del 12 jun al 20 sep",
+        figure_height=8.8,
+        row_height=0.76,
+    )
     yield "schedule"
 
     # Notebook step: water_inputs
@@ -1599,9 +1682,17 @@ def _analysis_steps(
         minimum_n = int(counts.min())
         maximum_n = int(counts.max())
         sample_size_text = (
-            f"n = {minimum_n} parcelas por punto"
+            rf"$n = {minimum_n}$ parcelas por punto"
             if minimum_n == maximum_n
-            else f"n = {minimum_n}–{maximum_n} parcelas por punto"
+            else rf"$n = {minimum_n}$–${maximum_n}$ parcelas por punto"
+        )
+        sample_size_latex = (
+            rf"\ensuremath{{n = {minimum_n}}} parcelas por punto"
+            if minimum_n == maximum_n
+            else (
+                rf"\ensuremath{{n = {minimum_n}}}--"
+                rf"\ensuremath{{{maximum_n}}} parcelas por punto"
+            )
         )
 
         def mean_t_interval(values: Any) -> tuple[float, float]:
@@ -1675,7 +1766,11 @@ def _analysis_steps(
         add_figure_header(
             fig,
             OBSERVED_BY_DATE_TITLES[outcome],
-            subtitle=f"Media ± IC t del 95 % · {sample_size_text}",
+            subtitle=(rf"Media $\pm$ IC $t$ del $95\,\%$ $\cdot$ {sample_size_text}"),
+            latex_subtitle=(
+                r"Media \ensuremath{\pm} IC \ensuremath{t} del 95 \% "
+                rf"\ensuremath{{\cdot}} {sample_size_latex}"
+            ),
         )
         add_figure_note(
             fig,
@@ -3590,12 +3685,11 @@ def _analysis_steps(
                 "del modelo completo ± IC normal del 95 %."
             ),
         )
-        fig.text(
-            0.07,
-            0.865 if len(outcomes) == 1 else 0.895,
+        figure_exporter.add_annotation(
+            fig,
             "\n".join(p_lines),
-            ha="left",
-            va="top",
+            x=0.07,
+            y=0.865 if len(outcomes) == 1 else 0.895,
             color=mpl.rcParams["axes.labelcolor"],
             fontsize=9.25,
             linespacing=1.35,
@@ -3684,6 +3778,15 @@ def _analysis_steps(
                     "comunes y la dosis acumulada a cada muestreo."
                 ),
                 "prioridad": "Esencial",
+            },
+            {
+                "archivo": "figura_01b_zoom_aplicaciones_experimentales",
+                "ubicación sugerida": "Métodos — cuerpo principal o detalle",
+                "función": (
+                    "Amplía junio–octubre para hacer legibles las fechas, los saltos "
+                    "experimentales y las envolventes del período incierto."
+                ),
+                "prioridad": "Alta",
             },
             {
                 "archivo": "figura_02_aportes_mensuales_de_agua",
@@ -3891,8 +3994,9 @@ def _analysis_steps(
             print(" -", path.name)
 
     if EXPORT_FIGURES:
-        print("Figuras exportadas en:", FIGURES_DIR.resolve())
-        for path in sorted(FIGURES_DIR.glob("*")):
-            if path.suffix.lower() in {".png", ".pdf"}:
+        exported_figure_directory = figure_exporter.output_directory
+        print("Figuras exportadas en:", exported_figure_directory.resolve())
+        for path in sorted(exported_figure_directory.glob("*")):
+            if path.suffix.lower() in {".png", ".pdf", ".json"}:
                 print(" -", path.name)
     yield "export_artifacts"

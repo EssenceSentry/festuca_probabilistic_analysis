@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import io
+import json
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
 import matplotlib as mpl
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.colors import to_hex
@@ -29,6 +35,7 @@ from festuca_analysis.plotting import (
     INTERVAL_LINEWIDTH,
     PLOT_FONT_FAMILY,
     REFERENCE_LINEWIDTH,
+    FigureExporter,
     apply_plot_theme,
 )
 from festuca_analysis.statistics import (
@@ -56,6 +63,64 @@ class PlotThemeTests(unittest.TestCase):
             self.assertGreater(INTERVAL_LINEWIDTH, REFERENCE_LINEWIDTH)
             self.assertFalse(mpl_api.rcParams["axes.spines.top"])
             self.assertFalse(mpl_api.rcParams["axes.spines.right"])
+
+    def test_standalone_export_preserves_embedded_header_and_png(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output_directory = Path(temporary_directory)
+            exporter = FigureExporter(output_directory, profile="standalone", dpi=72)
+            figure, _axis = plt.subplots(figsize=(2.0, 1.5))
+            exporter.add_header(figure, "Título M1–M5", subtitle="IC del 95 % ±")
+            exporter.add_note(figure, "Nota")
+            exporter.save(figure, "figura_prueba")
+
+            self.assertTrue((output_directory / "figura_prueba.pdf").is_file())
+            self.assertTrue((output_directory / "figura_prueba.png").is_file())
+            self.assertFalse((output_directory / "figura_prueba.json").exists())
+            self.assertGreaterEqual(len(figure.texts), 3)
+            self.assertEqual(figure.texts[0].get_text(), "Título M1–M5")
+            self.assertEqual(figure.texts[1].get_text(), r"IC del 95 % $\pm$")
+            plt.close(figure)
+
+    def test_thesis_export_writes_clean_pdf_and_json_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output_directory = Path(temporary_directory)
+            exporter = FigureExporter(
+                output_directory,
+                profile="thesis",
+                print_json=True,
+            )
+            figure, _axis = plt.subplots(figsize=(2.0, 1.5))
+            exporter.add_header(figure, "Título M1–M5", subtitle="IC del 95 % ±")
+            exporter.add_annotation(
+                figure,
+                "Resultado principal",
+                x=0.1,
+                y=0.9,
+            )
+            exporter.add_note(figure, "Nota metodológica")
+            printed = io.StringIO()
+            with redirect_stdout(printed):
+                payload = exporter.save(figure, "figura_prueba")
+
+            thesis_directory = output_directory / "thesis"
+            sidecar = json.loads(
+                (thesis_directory / "figura_prueba.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue((thesis_directory / "figura_prueba.pdf").is_file())
+            self.assertFalse((thesis_directory / "figura_prueba.png").exists())
+            self.assertEqual(sidecar, payload)
+            self.assertEqual(json.loads(printed.getvalue()), payload)
+            self.assertEqual(sidecar["text_format"], "latex")
+            self.assertEqual(sidecar["pdf_file"], "figura_prueba.pdf")
+            self.assertEqual(sidecar["latex"]["label"], "fig:figura-prueba")
+            self.assertEqual(sidecar["title"], "Título M1--M5")
+            self.assertEqual(
+                sidecar["subtitle"],
+                r"IC del 95 \% \ensuremath{\pm}",
+            )
+            self.assertIn("Resultado principal.", sidecar["caption"])
+            self.assertEqual(figure.texts, [])
+            plt.close(figure)
 
 
 class NitrogenScheduleTests(unittest.TestCase):

@@ -34,6 +34,35 @@ tratamiento y fija espesores distintos para datos, intervalos, referencias y
 grilla. Salvo el gráfico que superpone Secano y Riego en un mismo eje, todos los
 puntos usan el mismo marcador circular.
 
+## Perfiles de exportación de figuras
+
+El análisis longitudinal ofrece dos perfiles sobre la misma construcción de
+cada gráfico:
+
+- `standalone` conserva el formato autónomo con título, subtítulo y nota dentro
+  de un PNG de 300 dpi y un PDF vectorial en `festuca_thesis_figures/`;
+- `thesis` guarda un PDF vectorial limpio y un JSON sidecar con título,
+  subtítulo, pie, notas y metadatos para LaTeX en
+  `festuca_thesis_figures/thesis/`.
+
+Los campos textuales del sidecar usan LaTeX real (`\pm`, `\approx`, `\times`,
+`\cdot`, exponentes y porcentajes escapados), no sustitutos Unicode. El campo
+`text_format` permite comprobarlo programáticamente.
+
+`festuca_estudio_longitudinal.ipynb` usa `thesis` e imprime cada JSON
+inmediatamente antes de la figura correspondiente. La ejecución de terminal
+conserva `standalone` como perfil predeterminado. También puede seleccionarse
+explícitamente desde Python:
+
+```python
+from festuca_analysis import LongitudinalNotebook
+
+analysis = LongitudinalNotebook(
+    figure_profile="thesis",
+    print_figure_json=True,
+)
+```
+
 ## Ejecución sin Jupyter
 
 Los mismos análisis pueden ejecutarse desde una terminal:

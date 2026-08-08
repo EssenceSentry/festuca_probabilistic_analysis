@@ -21,7 +21,7 @@ reference-section-title: "8. Bibliografía"
 
 # Resumen
 
-Se evaluó el efecto del momento de aplicación de nitrógeno sobre el crecimiento, el estado nitrogenado, los componentes del rendimiento y el rendimiento de semilla de festuca alta (*Festuca arundinacea* Schreb.) cv. Rizar. El estudio se realizó durante 2025 en dos sectores próximos de un semillero establecido, uno manejado en secano y otro con riego suplementario. En cada sector se utilizó un diseño de bloques completos al azar con cuatro bloques y seis tratamientos. M1–M5 recibieron 200 kg N ha⁻¹, fraccionados en dos aplicaciones de 100 kg N ha⁻¹ realizadas en distintos momentos entre junio y septiembre, y M0 se incluyó como testigo sin nitrógeno experimental adicional. Se determinaron biomasa aérea, concentración y acumulación de nitrógeno, Índice de Nutrición Nitrogenada, densidad de panojas, número estimado de semillas por panoja, peso de mil semillas, índice de cosecha y rendimiento de semilla limpia. Entre M1–M5 no se detectaron diferencias significativas de rendimiento en secano (p = 0,4287) ni en riego suplementario (p = 0,1759). Las aplicaciones tempranas adelantaron la acumulación de biomasa y nitrógeno y tendieron a favorecer la densidad de panojas, mientras que las aplicaciones intermedias y tardías mantuvieron mayores concentraciones relativas de nitrógeno hacia etapas posteriores y tendieron a presentar más semillas estimadas por panoja. Se observó una relación inversa entre la densidad de panojas y el número estimado de semillas por panoja, que pudo atenuar las diferencias de rendimiento, sin demostrar una recuperación completa de los componentes definidos previamente. Como referencia complementaria, todos los tratamientos fertilizados superaron a M0: el rendimiento medio de M1–M5 fue de 1365,79 frente a 702,63 kg ha⁻¹ en secano y de 1285,66 frente a 645,39 kg ha⁻¹ en el sector regado. Se concluye que, dentro del intervalo evaluado, el momento de aplicación modificó la trayectoria de crecimiento, nutrición y formación de los componentes, pero no permitió identificar un calendario consistentemente superior para el rendimiento final. Las diferencias medias entre sectores se interpretaron de manera descriptiva.
+Se evaluó el efecto del momento de aplicación de nitrógeno sobre el crecimiento, el estado nitrogenado, los componentes del rendimiento y el rendimiento de semilla de festuca alta (*Festuca arundinacea* Schreb.) cv. Rizar. El estudio se realizó durante 2025 en dos sectores próximos de un semillero establecido, uno manejado en secano y otro con riego suplementario. En cada sector se utilizó un diseño de bloques completos al azar con cuatro bloques y seis tratamientos. M1–M5 recibieron $200 kg N ha⁻¹$, fraccionados en dos aplicaciones de $100 kg N ha⁻¹$ realizadas en distintos momentos entre junio y septiembre, y M0 se incluyó como testigo sin nitrógeno experimental adicional. Se determinaron biomasa aérea, concentración y acumulación de nitrógeno, Índice de Nutrición Nitrogenada, densidad de panojas, número estimado de semillas por panoja, peso de mil semillas, índice de cosecha y rendimiento de semilla limpia. Entre M1–M5 no se detectaron diferencias significativas de rendimiento en secano ($p = 0,4287$) ni en riego suplementario ($p = 0,1759$). Las aplicaciones tempranas adelantaron la acumulación de biomasa y nitrógeno y tendieron a favorecer la densidad de panojas, mientras que las aplicaciones intermedias y tardías mantuvieron mayores concentraciones relativas de nitrógeno hacia etapas posteriores y tendieron a presentar más semillas estimadas por panoja. Se observó una relación inversa entre la densidad de panojas y el número estimado de semillas por panoja, que pudo atenuar las diferencias de rendimiento, sin demostrar una recuperación completa de los componentes definidos previamente. Como referencia complementaria, todos los tratamientos fertilizados superaron a M0: el rendimiento medio de M1–M5 fue de $1365,79$ frente a $702,63 kg ha⁻¹$ en secano y de $1285,66$ frente a $645,39 kg ha⁻¹$ en el sector regado. Se concluye que, dentro del intervalo evaluado, el momento de aplicación modificó la trayectoria de crecimiento, nutrición y formación de los componentes, pero no permitió identificar un calendario consistentemente superior para el rendimiento final. Las diferencias medias entre sectores se interpretaron de manera descriptiva.
 
 **Palabras clave:** festuca alta; producción de semilla; fertilización nitrogenada; momento de aplicación; Índice de Nutrición Nitrogenada; riego suplementario.
 
@@ -49,7 +49,7 @@ El cultivar Rizar es un material de tipo continental-rizomatoso, caracterizado p
 
 En el presente trabajo se compararon cinco calendarios de aplicación de una misma dosis experimental de nitrógeno (M1–M5); adicionalmente, se incluyó M0 como testigo sin nitrógeno experimental adicional. Los tratamientos se establecieron en dos sectores próximos de un mismo semillero, uno manejado en secano y otro con riego suplementario. La respuesta a los momentos de aplicación se evaluó dentro de cada sector. La comparación media entre sectores se consideró descriptiva porque cada condición hídrica estuvo representada por un único sector.
 
-El objetivo del trabajo fue evaluar el efecto del momento de aplicación de una dosis experimental total de 200 kg de nitrógeno por hectárea, fraccionada en dos aplicaciones, sobre el crecimiento, el estado nitrogenado, los componentes del rendimiento y el rendimiento de semilla de *Festuca arundinacea* Schreb. cv. Rizar, y determinar si el patrón de respuesta fue consistente entre los sectores de secano y riego suplementario.
+El objetivo del trabajo fue evaluar el efecto del momento de aplicación de una dosis experimental total de $200 kg de nitrógeno por hectárea$, fraccionada en dos aplicaciones, sobre el crecimiento, el estado nitrogenado, los componentes del rendimiento y el rendimiento de semilla de *Festuca arundinacea* Schreb. cv. Rizar, y determinar si el patrón de respuesta fue consistente entre los sectores de secano y riego suplementario.
 
 # 2. Revisión bibliográfica
 
@@ -126,7 +126,7 @@ Estas respuestas fueron relacionadas con una mayor disponibilidad de nitrógeno 
 
 Los antecedentes nacionales también muestran que la respuesta del rendimiento por inflorescencia fue menos consistente que la respuesta del número de panojas. Asimismo, el fraccionamiento de la dosis no siempre produjo una ventaja respecto a una aplicación única realizada en un momento oportuno [@formoso2010].
 
-En el norte de la provincia de Buenos Aires, Bazzigalupi y Bertín [-@bazzigalupi2014] evaluaron dosis comprendidas entre 0 y 300 kg de nitrógeno por hectárea y aplicaciones enteras o fraccionadas a fines del invierno, bajo condiciones de riego. La dosis modificó el rendimiento y diversas variables asociadas, mientras que el fraccionamiento no produjo una ventaja constante.
+En el norte de la provincia de Buenos Aires, Bazzigalupi y Bertín [-@bazzigalupi2014] evaluaron dosis comprendidas entre 0 y $300 kg de nitrógeno por hectárea$ y aplicaciones enteras o fraccionadas a fines del invierno, bajo condiciones de riego. La dosis modificó el rendimiento y diversas variables asociadas, mientras que el fraccionamiento no produjo una ventaja constante.
 
 Este antecedente indica que la cantidad total de nitrógeno disponible puede ejercer un efecto más consistente sobre el rendimiento que su distribución en varias aplicaciones. Sin embargo, su comparación con el presente trabajo debe realizarse con cautela debido a las diferencias de cultivar, suelo, clima, cronología de aplicación y manejo hídrico.
 
@@ -138,9 +138,9 @@ La disponibilidad efectiva del nitrógeno aplicado también depende de las condi
 
 Por esta razón, dos tratamientos aplicados en fechas diferentes pueden diferir no solo en su relación con la fenología, sino también en las condiciones meteorológicas y edáficas que determinan la transformación y absorción del fertilizante. La interpretación de los ensayos de momento de aplicación requiere, por lo tanto, considerar conjuntamente el calendario, el estado del cultivo y las condiciones ambientales.
 
-En el presente experimento, todos los tratamientos fertilizados recibieron una dosis experimental total de 200 kg de nitrógeno por hectárea, fraccionada en dos aplicaciones. En consecuencia, la comparación entre M1 y M5 representa el efecto del desplazamiento temporal de una misma dosis y no una curva de respuesta a cantidades crecientes de nitrógeno.
+En el presente experimento, todos los tratamientos fertilizados recibieron una dosis experimental total de $200 kg de nitrógeno por hectárea$, fraccionada en dos aplicaciones. En consecuencia, la comparación entre M1 y M5 representa el efecto del desplazamiento temporal de una misma dosis y no una curva de respuesta a cantidades crecientes de nitrógeno.
 
-El tratamiento M0 tampoco representa una condición de ausencia completa de nitrógeno. El semillero había recibido fertilizaciones generales como parte del manejo común y disponía además del nitrógeno aportado por el suelo. Por lo tanto, la comparación entre M0 y M1–M5 cuantifica la respuesta a los 200 kg de nitrógeno por hectárea aplicados experimentalmente, sobre una base de manejo nitrogenado previa y uniforme.
+El tratamiento M0 tampoco representa una condición de ausencia completa de nitrógeno. El semillero había recibido fertilizaciones generales como parte del manejo común y disponía además del nitrógeno aportado por el suelo. Por lo tanto, la comparación entre M0 y M1–M5 cuantifica la respuesta a los $200 kg de nitrógeno por hectárea$ aplicados experimentalmente, sobre una base de manejo nitrogenado previa y uniforme.
 
 La dosis evaluada fue elevada en comparación con varios antecedentes. Como se estudió un único nivel de fertilización experimental, el trabajo no permite determinar una dosis óptima ni establecer una recomendación económica. Su alcance se restringe a evaluar la respuesta al nitrógeno experimental adicional y las diferencias generadas por su distribución temporal.
 
@@ -170,7 +170,7 @@ Por lo tanto, la respuesta a una estrategia de fertilización nitrogenada puede 
 
 La oportunidad del riego también debe relacionarse con la formación secuencial de los componentes del rendimiento. Un aporte de agua realizado después de que el número de panojas o de flores potenciales ya fue definido puede sostener la biomasa o el llenado, pero difícilmente recupere completamente componentes determinados en etapas anteriores.
 
-En el presente experimento se aplicaron 165 mm de riego suplementario, de los cuales 90 mm correspondieron a octubre. Durante ese mismo mes se registraron 141 mm de precipitación. Sin mediciones de humedad del suelo, almacenamiento de agua y evapotranspiración no es posible determinar con precisión qué déficit fue corregido por el riego ni qué proporción del agua aportada estuvo disponible para el cultivo.
+En el presente experimento se aplicaron $165 mm$ de riego suplementario, de los cuales $90 mm$ correspondieron a octubre. Durante ese mismo mes se registraron $141 mm$ de precipitación. Sin mediciones de humedad del suelo, almacenamiento de agua y evapotranspiración no es posible determinar con precisión qué déficit fue corregido por el riego ni qué proporción del agua aportada estuvo disponible para el cultivo.
 
 La comparación entre condiciones hídricas depende de la estructura del diseño experimental. Cuando cada condición ocupa un único sector, las parcelas constituyen repeticiones de los tratamientos nitrogenados, pero no repeticiones independientes del régimen hídrico; por ello, las diferencias medias entre sectores pueden estar confundidas con variaciones espaciales de suelo, topografía, implantación o fertilidad [@hurlbert1984].
 
@@ -198,7 +198,7 @@ La expresión eficiencia de uso del nitrógeno comprende indicadores que respond
 
 La productividad parcial relaciona el rendimiento obtenido con la dosis de nitrógeno aplicada. La eficiencia agronómica expresa el incremento de rendimiento respecto a un tratamiento testigo por unidad de nitrógeno agregado. La recuperación aparente relaciona el incremento de nitrógeno absorbido con la dosis aplicada, mientras que la eficiencia fisiológica vincula el aumento del rendimiento con el incremento de nitrógeno absorbido. Estos indicadores no son equivalentes ni pueden utilizarse indistintamente.
 
-En el presente trabajo se utilizó la eficiencia agronómica del nitrógeno, debido a que permite cuantificar la cantidad adicional de semilla limpia producida por kilogramo de nitrógeno experimental aplicado. Para cada tratamiento fertilizado, el incremento del rendimiento se calculó respecto a M0 del mismo bloque y ensayo, y se dividió entre la dosis experimental total de 200 kg de nitrógeno por hectárea.
+En el presente trabajo se utilizó la eficiencia agronómica del nitrógeno, debido a que permite cuantificar la cantidad adicional de semilla limpia producida por kilogramo de nitrógeno experimental aplicado. Para cada tratamiento fertilizado, el incremento del rendimiento se calculó respecto a M0 del mismo bloque y ensayo, y se dividió entre la dosis experimental total de $200 kg de nitrógeno por hectárea$.
 
 Este indicador debe interpretarse considerando que M0 no representó una condición de ausencia total de nitrógeno. Todas las parcelas recibieron la fertilización general del semillero y estuvieron expuestas al aporte del suelo. Además, como M1–M5 recibieron la misma dosis experimental, la eficiencia agronómica constituyó una transformación lineal del rendimiento y no generó una prueba estadística independiente.
 
@@ -214,17 +214,17 @@ La comparación del indicador entre sectores requiere una precaución adicional,
 
 El momento de aplicación del nitrógeno puede modificar, en primer término, la dinámica de producción de biomasa y el estado nitrogenado del cultivo; posteriormente, la formación y supervivencia de panojas, el número de semillas por panoja y el peso individual; y, finalmente, el rendimiento de semilla y los indicadores derivados. La ausencia de diferencias en el rendimiento final no implica una ausencia de respuesta fisiológica, porque trayectorias contrastantes pueden converger mediante relaciones inversas entre componentes, sin que ello demuestre una recuperación completa de pérdidas ocurridas previamente.
 
-La comparación principal entre M1–M5 evalúa el efecto del momento de aplicación cuando la dosis total se mantiene constante. De manera complementaria, la inclusión de M0 permite describir la respuesta a los 200 kg N ha⁻¹ aplicados experimentalmente, y la interacción momento × sector examina si el patrón relativo de M1–M5 difiere entre los sectores de secano y riego suplementario. Esta separación evita atribuir al momento diferencias asociadas con la presencia o ausencia de fertilización experimental.
+La comparación principal entre M1–M5 evalúa el efecto del momento de aplicación cuando la dosis total se mantiene constante. De manera complementaria, la inclusión de M0 permite describir la respuesta a los $200 kg N ha⁻¹$ aplicados experimentalmente, y la interacción momento × sector examina si el patrón relativo de M1–M5 difiere entre los sectores de secano y riego suplementario. Esta separación evita atribuir al momento diferencias asociadas con la presencia o ausencia de fertilización experimental.
 
 # 3. Objetivos e hipótesis
 
 ## 3.1 Pregunta experimental
 
-¿Cómo afecta el momento de aplicación de una dosis experimental total de 200 kg N ha⁻¹, fraccionada en dos aplicaciones entre junio y septiembre, la dinámica de crecimiento y nutrición nitrogenada, los componentes del rendimiento y el rendimiento de semilla de festuca alta cv. Rizar, y en qué medida el patrón de respuesta es consistente entre los sectores de secano y riego suplementario?
+¿Cómo afecta el momento de aplicación de una dosis experimental total de $200 kg N ha⁻¹$, fraccionada en dos aplicaciones entre junio y septiembre, la dinámica de crecimiento y nutrición nitrogenada, los componentes del rendimiento y el rendimiento de semilla de festuca alta cv. Rizar, y en qué medida el patrón de respuesta es consistente entre los sectores de secano y riego suplementario?
 
 ## 3.2 Objetivo general
 
-Evaluar el efecto del momento de aplicación de una dosis experimental total de 200 kg N ha⁻¹, fraccionada en dos aplicaciones, sobre el crecimiento, el estado nitrogenado, los componentes del rendimiento y el rendimiento de semilla de *Festuca arundinacea* Schreb. cv. Rizar, y examinar la consistencia del patrón de respuesta entre los sectores próximos manejados bajo secano y riego suplementario.
+Evaluar el efecto del momento de aplicación de una dosis experimental total de $200 kg N ha⁻¹$, fraccionada en dos aplicaciones, sobre el crecimiento, el estado nitrogenado, los componentes del rendimiento y el rendimiento de semilla de *Festuca arundinacea* Schreb. cv. Rizar, y examinar la consistencia del patrón de respuesta entre los sectores próximos manejados bajo secano y riego suplementario.
 
 ## 3.3 Objetivos específicos
 
@@ -250,15 +250,15 @@ Evaluar el efecto del momento de aplicación de una dosis experimental total de 
 
 ## 4.1 Sitio experimental
 
-El trabajo se realizó durante el ciclo reproductivo de 2025 en un semillero establecido de festuca alta (*Festuca arundinacea* Schreb.) cv. Rizar, ubicado en el establecimiento La Favorita, en el departamento de Soriano, Uruguay, en una zona rural próxima a Sacachispas. El sitio se localizó en las coordenadas geográficas 33°12′01,09″ S y 57°32′18″ O, referidas al sistema geodésico WGS 84, a una elevación aproximada de 75 m sobre el nivel del mar. El paisaje corresponde a lomadas y los ensayos se ubicaron en una posición de ladera alta, sobre una pendiente suave de aproximadamente 3 %. El semillero había sido implantado en 2023 y, al momento del experimento, correspondía a un cultivo establecido con antecedentes de utilización mediante pastoreo y fertilización general a escala de chacra.
+El trabajo se realizó durante el ciclo reproductivo de 2025 en un semillero establecido de festuca alta (*Festuca arundinacea* Schreb.) cv. Rizar, ubicado en el establecimiento La Favorita, en el departamento de Soriano, Uruguay, en una zona rural próxima a Sacachispas. El sitio se localizó en las coordenadas geográficas 33°12′01,09″ S y 57°32′18″ O, referidas al sistema geodésico WGS 84, a una elevación aproximada de $75 m$ sobre el nivel del mar. El paisaje corresponde a lomadas y los ensayos se ubicaron en una posición de ladera alta, sobre una pendiente suave de aproximadamente $3\%$. El semillero había sido implantado en 2023 y, al momento del experimento, correspondía a un cultivo establecido con antecedentes de utilización mediante pastoreo y fertilización general a escala de chacra.
 
 Según la Carta de Suelos a escala 1:100.000, el sitio se ubicó en la unidad cartográfica Bequeló (BQ), caracterizada por la presencia de Brunosoles y Vertisoles con texturas comprendidas entre francas y limo-arcillosas. El área correspondió al grupo CONEAT 11.2.
 
-Antes del período experimental se realizó una caracterización química del suelo. El análisis indicó un contenido de fósforo Bray 1 de 14 ppm, 91 % de saturación de bases, 3,4 % de materia orgánica y un pH de 6,04. Los contenidos de potasio, calcio, magnesio y sodio fueron 0,77; 20,5; 3,53 y 0,33 meq/100 g de suelo, respectivamente.
+Antes del período experimental se realizó una caracterización química del suelo. El análisis indicó un contenido de fósforo Bray 1 de $14 ppm$, $91\%$ de saturación de bases, $3,4\%$ de materia orgánica y un pH de $6,04$. Los contenidos de potasio, calcio, magnesio y sodio fueron $0,77$, $20,5$, $3,53$ y $0,33\; \mathrm{meq/100\,g}$ de suelo, respectivamente.
 
 ## 4.2 Material vegetal
 
-El material vegetal utilizado fue festuca alta (*Festuca arundinacea* Schreb.) cv. Rizar. Este cultivar, de tipo continental-rizomatoso, presenta hábito de crecimiento semipostrado, capacidad para formar un tapiz denso, persistencia, rusticidad y buen comportamiento sanitario frente a royas. Su fecha de floración es intermedia y similar a la del cultivar Estanzuela Tacuabé [@maranges2019]. El semillero fue implantado en 2023 mediante siembra directa, con una densidad de 20 kg de semilla ha⁻¹. La semilla utilizada fue provista por PGG Wrightson Seeds.
+El material vegetal utilizado fue festuca alta (*Festuca arundinacea* Schreb.) cv. Rizar. Este cultivar, de tipo continental-rizomatoso, presenta hábito de crecimiento semipostrado, capacidad para formar un tapiz denso, persistencia, rusticidad y buen comportamiento sanitario frente a royas. Su fecha de floración es intermedia y similar a la del cultivar Estanzuela Tacuabé [@maranges2019]. El semillero fue implantado en 2023 mediante siembra directa, con una densidad de $20 kg de semilla ha⁻¹$. La semilla utilizada fue provista por PGG Wrightson Seeds.
 
 ## 4.3 Diseño experimental
 
@@ -266,17 +266,17 @@ Se establecieron dos ensayos en sectores próximos de un mismo semillero. Uno se
 
 Dentro de cada ensayo se utilizó un diseño de bloques completos al azar con cuatro bloques y una repetición de cada tratamiento por bloque. Los tratamientos se asignaron aleatoriamente a las parcelas dentro de cada sector.
 
-Cada unidad experimental tuvo una superficie de 24 m², correspondiente a parcelas de 4 m de ancho por 6 m de largo. Cada ensayo estuvo integrado por 24 parcelas, resultantes de la combinación de seis tratamientos y cuatro bloques.
+Cada unidad experimental tuvo una superficie de $24 m²$, correspondiente a parcelas de $4 m$ de ancho por $6 m$ de largo. Cada ensayo estuvo integrado por 24 parcelas, resultantes de la combinación de seis tratamientos y cuatro bloques.
 
-La parcela constituyó la unidad experimental para evaluar el efecto de los tratamientos nitrogenados dentro de cada ensayo. La condición hídrica, en cambio, estuvo representada por un único sector de secano y un único sector con riego suplementario, sin aleatorización ni replicación en unidades hídricas independientes. Por esta razón, las diferencias medias entre sectores no se interpretaron como un efecto causal exclusivo del riego. Se generó una asignación aleatoria de los tratamientos dentro de los bloques y la misma distribución se reprodujo en ambos sectores. Las parcelas estuvieron separadas por calles de 2 m. No se establecieron borduras experimentales específicas; los cambios de manejo fuera de los ensayos se realizaron a varios metros de las parcelas para minimizar posibles interferencias.
+La parcela constituyó la unidad experimental para evaluar el efecto de los tratamientos nitrogenados dentro de cada ensayo. La condición hídrica, en cambio, estuvo representada por un único sector de secano y un único sector con riego suplementario, sin aleatorización ni replicación en unidades hídricas independientes. Por esta razón, las diferencias medias entre sectores no se interpretaron como un efecto causal exclusivo del riego. Se generó una asignación aleatoria de los tratamientos dentro de los bloques y la misma distribución se reprodujo en ambos sectores. Las parcelas estuvieron separadas por calles de $2 m$. No se establecieron borduras experimentales específicas; los cambios de manejo fuera de los ensayos se realizaron a varios metros de las parcelas para minimizar posibles interferencias.
 
 ## 4.4 Tratamientos de fertilización nitrogenada
 
 Se evaluaron seis tratamientos definidos por el momento de aplicación del nitrógeno durante el período invierno-primaveral. M0 correspondió al testigo sin nitrógeno experimental adicional, mientras que M1, M2, M3, M4 y M5 recibieron la misma dosis total, distribuida en diferentes fechas.
 
-Los tratamientos M1–M5 recibieron 200 kg N ha⁻¹, fraccionados en dos aplicaciones de 100 kg N ha⁻¹. La fuente utilizada fue urea con 46 % de nitrógeno, por lo que cada aplicación equivalió a 217,4 kg de urea por hectárea.
+Los tratamientos M1–M5 recibieron $200 kg N ha⁻¹$, fraccionados en dos aplicaciones de $100 kg N ha⁻¹$. La fuente utilizada fue urea con $46\%$ de nitrógeno, por lo que cada aplicación equivalió a $217,4 kg de urea$ por hectárea.
 
-Cada parcela tuvo una superficie de 24 m². En consecuencia, en cada aplicación se distribuyeron 0,522 kg de urea por parcela, equivalentes a 1,043 kg de urea por parcela al completar las dos aplicaciones. La dosis correspondiente a cada unidad experimental se pesó en un recipiente previamente tarado. La urea se distribuyó manualmente sobre toda la superficie, mediante varias pasadas y liberando el fertilizante de forma gradual para lograr la mayor uniformidad posible. El fertilizante no se incorporó al suelo.
+Cada parcela tuvo una superficie de $24 m²$. En consecuencia, en cada aplicación se distribuyeron $0,522 kg de urea$ por parcela, equivalentes a $1,043 kg de urea$ por parcela al completar las dos aplicaciones. La dosis correspondiente a cada unidad experimental se pesó en un recipiente previamente tarado. La urea se distribuyó manualmente sobre toda la superficie, mediante varias pasadas y liberando el fertilizante de forma gradual para lograr la mayor uniformidad posible. El fertilizante no se incorporó al suelo.
 
 Las fechas de aplicación permitieron desplazar progresivamente la disponibilidad del nitrógeno desde junio hasta septiembre de 2025. La composición de los tratamientos se presenta en el Tabla 1.
 
@@ -284,22 +284,22 @@ Las fechas de aplicación permitieron desplazar progresivamente la disponibilida
 
 | **Tratamiento** | **Primera aplicación** | **Segunda aplicación** | **Nitrógeno experimental total** |
 |-----------------|------------------------|------------------------|----------------------------------|
-| M0              | Sin aplicación         | Sin aplicación         | 0 kg N ha⁻¹                      |
-| M1              | 12 de junio            | 31 de julio            | 200 kg N ha⁻¹                    |
-| M2              | 26 de junio            | 31 de julio            | 200 kg N ha⁻¹                    |
-| M3              | 10 de julio            | 21 de agosto           | 200 kg N ha⁻¹                    |
-| M4              | 31 de julio            | 4 de septiembre        | 200 kg N ha⁻¹                    |
-| M5              | 21 de agosto           | 20 de septiembre       | 200 kg N ha⁻¹                    |
+| M0              | Sin aplicación         | Sin aplicación         | $0 kg N ha⁻¹$                      |
+| M1              | 12 de junio            | 31 de julio            | $200 kg N ha⁻¹$                    |
+| M2              | 26 de junio            | 31 de julio            | $200 kg N ha⁻¹$                    |
+| M3              | 10 de julio            | 21 de agosto           | $200 kg N ha⁻¹$                    |
+| M4              | 31 de julio            | 4 de septiembre        | $200 kg N ha⁻¹$                    |
+| M5              | 21 de agosto           | 20 de septiembre       | $200 kg N ha⁻¹$                    |
 
 ## 4.5 Manejo del cultivo
 
 ### 4.5.1 Manejo previo y general del semillero
 
-Durante enero de 2025 el semillero fue utilizado mediante pastoreo rotativo. En marzo se aplicó Diuron 80 % a una dosis de 1,6 kg ha⁻¹ y en abril se realizó una fertilización general con 150 kg ha⁻¹ de urea azufrada, cuya composición fue de 40 % de nitrógeno y 5 % de azufre.
+Durante enero de 2025 el semillero fue utilizado mediante pastoreo rotativo. En marzo se aplicó Diuron $80 \%$ a una dosis de $1,6 kg ha⁻¹$ y en abril se realizó una fertilización general con $150 kg ha⁻¹$ de urea azufrada, cuya composición fue de $40 \%$ de nitrógeno y $5 \%$ de azufre.
 
-El pastoreo se suspendió el 1.º de julio de 2025. Al cierre, el cultivo presentó un remanente de aproximadamente 15 cm, relativamente uniforme entre las parcelas. En esa fecha se aplicaron 130 kg ha⁻¹ de urea azufrada y durante agosto se efectuó una segunda aplicación general de 130 kg ha⁻¹ del mismo fertilizante.
+El pastoreo se suspendió el 1.º de julio de 2025. Al cierre, el cultivo presentó un remanente de aproximadamente $15 cm$, relativamente uniforme entre las parcelas. En esa fecha se aplicaron $130 kg ha⁻¹$ de urea azufrada y durante agosto se efectuó una segunda aplicación general de $130 kg ha⁻¹$ del mismo fertilizante.
 
-En octubre se realizaron aplicaciones para el manejo sanitario del cultivo. Se aplicó un fungicida formulado con protioconazol y trifloxistrobin, a una dosis de 750 cm³ ha⁻¹, y un insecticida a base de clorantraniliprole, a una dosis de 12 g ha⁻¹.
+En octubre se realizaron aplicaciones para el manejo sanitario del cultivo. Se aplicó un fungicida formulado con protioconazol y trifloxistrobin, a una dosis de $750 cm^3 ha⁻¹$, y un insecticida a base de clorantraniliprole, a una dosis de $12 g ha⁻¹$.
 
 Todas estas prácticas se realizaron uniformemente en el semillero y alcanzaron los sectores correspondientes a los ensayos de secano y riego suplementario. No se aplicaron otras fuentes de nitrógeno además de las fertilizaciones generales descritas y de la urea correspondiente a los tratamientos experimentales. Por lo tanto, las prácticas generales se consideraron parte del manejo del cultivo y no integraron la definición ni la dosis de los tratamientos M0–M5.
 
@@ -307,17 +307,17 @@ Todas estas prácticas se realizaron uniformemente en el semillero y alcanzaron 
 
 El manejo diferencial entre parcelas estuvo determinado exclusivamente por el momento de aplicación de la urea en los tratamientos M1–M5; M0 no recibió urea experimental. Dentro de cada ensayo, las restantes prácticas de manejo se realizaron de manera uniforme en todas las unidades experimentales.
 
-En consecuencia, M0 debe interpretarse como un testigo sin nitrógeno experimental adicional y no como un tratamiento sin aporte previo de nitrógeno. Tanto M0 como los tratamientos M1–M5 recibieron las fertilizaciones generales realizadas en el semillero. La dosis experimental de 200 kg de nitrógeno por hectárea corresponde exclusivamente a las aplicaciones descritas en el Tabla 1.
+En consecuencia, M0 debe interpretarse como un testigo sin nitrógeno experimental adicional y no como un tratamiento sin aporte previo de nitrógeno. Tanto M0 como los tratamientos M1–M5 recibieron las fertilizaciones generales realizadas en el semillero. La dosis experimental de $200 kg de nitrógeno por hectárea$ corresponde exclusivamente a las aplicaciones descritas en el Tabla 1.
 
 ## 4.6 Manejo hídrico
 
 Se evaluaron dos condiciones hídricas, correspondientes a los ensayos de secano y riego suplementario.
 
-En el ensayo de secano, el cultivo dependió de las precipitaciones ocurridas durante el período experimental. En el ensayo bajo riego se utilizó un sistema de pivote central y se aplicaron 165 mm de agua suplementaria, según los registros operativos del productor. La lámina se distribuyó mensualmente de la siguiente manera: 15 mm en junio, 30 mm en septiembre, 90 mm en octubre y 30 mm en noviembre de 2025.
+En el ensayo de secano, el cultivo dependió de las precipitaciones ocurridas durante el período experimental. En el ensayo bajo riego se utilizó un sistema de pivote central y se aplicaron $165 mm$ de agua suplementaria, según los registros operativos del productor. La lámina se distribuyó mensualmente de la siguiente manera: $15 mm$ en junio, $30 mm$ en septiembre, $90 mm$ en octubre y $30 mm$ en noviembre de 2025.
 
-Entre junio y noviembre de 2025 se registraron 510 mm de precipitación. Los datos provinieron de una estación meteorológica ubicada aproximadamente a 150–200 m de los ensayos. La distribución mensual fue de 43 mm en junio, 62 mm en julio, 101 mm en agosto, 89 mm en septiembre, 141 mm en octubre y 74 mm en noviembre. La precipitación acumulada entre enero y noviembre fue de 1176 mm.
+Entre junio y noviembre de 2025 se registraron $510 mm$ de precipitación. Los datos provinieron de una estación meteorológica ubicada aproximadamente a 150–$200 m$ de los ensayos. La distribución mensual fue de $43 mm$ en junio, $62 mm$ en julio, $101 mm$ en agosto, $89 mm$ en septiembre, $141 mm$ en octubre y $74 mm$ en noviembre. La precipitación acumulada entre enero y noviembre fue de $1176 mm$.
 
-Por lo tanto, durante el período comprendido entre junio y noviembre, el aporte de agua fue de 510 mm en el ensayo de secano y de 675 mm en el ensayo bajo riego, considerando en este último la suma de las precipitaciones y el riego suplementario.
+Por lo tanto, durante el período comprendido entre junio y noviembre, el aporte de agua fue de $510 mm$ en el ensayo de secano y de $675 mm$ en el ensayo bajo riego, considerando en este último la suma de las precipitaciones y el riego suplementario.
 
 Estos valores representan el agua aportada a cada ensayo y no el agua efectivamente consumida por el cultivo, debido a que no se determinaron la variación del almacenamiento de agua en el suelo, la evapotranspiración real, el escurrimiento superficial ni el drenaje.
 
@@ -333,9 +333,9 @@ La evaluación final de los componentes del rendimiento y del rendimiento de sem
 
 ### 4.7.2 Biomasa aérea
 
-En cada fecha de evaluación se cosechó la biomasa aérea presente en 1 m lineal de una hilera. Debido a que la distancia entre hileras fue de 0,38 m, cada muestra representó una superficie de 0,38 m².
+En cada fecha de evaluación se cosechó la biomasa aérea presente en $1 m$ lineal de una hilera. Debido a que la distancia entre hileras fue de $0,38 m$, cada muestra representó una superficie de $0,38 m²$.
 
-La biomasa cosechada se pesó en fresco y se extrajo una submuestra representativa de aproximadamente 100 g para determinar el porcentaje de materia seca. Las submuestras destinadas a materia seca se secaron en estufa a 70 °C hasta alcanzar peso constante. Las muestras destinadas a las determinaciones de calidad se secaron a 60 °C hasta peso constante y se remitieron al laboratorio de INIA. A partir del peso fresco total, el porcentaje de materia seca y la superficie evaluada se calculó la biomasa aérea, expresada en kilogramos de materia seca por hectárea.
+La biomasa cosechada se pesó en fresco y se extrajo una submuestra representativa de aproximadamente $100 g$ para determinar el porcentaje de materia seca. Las submuestras destinadas a materia seca se secaron en estufa a $70\,^\circ\mathrm{C}$ hasta alcanzar peso constante. Las muestras destinadas a las determinaciones de calidad se secaron a $60\,^\circ\mathrm{C}$ hasta peso constante y se remitieron al laboratorio de INIA. A partir del peso fresco total, el porcentaje de materia seca y la superficie evaluada se calculó la biomasa aérea, expresada en kilogramos de materia seca por hectárea.
 
 La biomasa aérea se calculó mediante la siguiente expresión:
 
@@ -358,9 +358,9 @@ El valor 0,38 corresponde a la superficie muestreada, expresada en metros cuadra
 
 ### 4.7.3 Densidad de macollos
 
-En la evaluación inicial se determinó la densidad de macollos mediante el conteo de los macollos presentes en 0,30 m lineales de una hilera.
+En la evaluación inicial se determinó la densidad de macollos mediante el conteo de los macollos presentes en $0,30 m$ lineales de una hilera.
 
-Considerando una distancia entre hileras de 0,38 m, la superficie evaluada fue de 0,114 m².
+Considerando una distancia entre hileras de $0,38 m$, la superficie evaluada fue de $0,114 m²$.
 
 La densidad de macollos se calculó mediante la siguiente expresión:
 
@@ -398,7 +398,7 @@ Concentración de nitrógeno es el porcentaje de nitrógeno determinado en la ma
 
 ### 4.7.5 Evaluación final del cultivo
 
-El 12 de noviembre de 2025, una vez alcanzada la madurez fisiológica, se tomaron dos muestras independientes en cada parcela. Para determinar la biomasa aérea final se cosechó la totalidad de la parte aérea presente en 1 m lineal de una hilera, equivalente a 0,38 m². Las plantas se cortaron a nivel del suelo con tijera y la muestra incluyó hojas, tallos, panojas y semillas. Para determinar la densidad de panojas y el rendimiento de semilla se cosecharon dos tramos de 1 m lineal, correspondientes a dos hileras diferentes, con una superficie total de 0,76 m². Las panojas se cortaron dejando aproximadamente 15–20 cm de tallo por debajo de la inflorescencia y se colocaron en bolsas de papel.
+El 12 de noviembre de 2025, una vez alcanzada la madurez fisiológica, se tomaron dos muestras independientes en cada parcela. Para determinar la biomasa aérea final se cosechó la totalidad de la parte aérea presente en $1 m$ lineal de una hilera, equivalente a $0,38 m²$. Las plantas se cortaron a nivel del suelo con tijera y la muestra incluyó hojas, tallos, panojas y semillas. Para determinar la densidad de panojas y el rendimiento de semilla se cosecharon dos tramos de $1 m$ lineal, correspondientes a dos hileras diferentes, con una superficie total de $0,76 m²$. Las panojas se cortaron dejando aproximadamente $15\text{–}20 cm$ de tallo por debajo de la inflorescencia y se colocaron en bolsas de papel.
 
 Las muestras, que se encontraban secas al momento de la recolección, se mantuvieron en bolsas de papel para evitar la acumulación de humedad y el calentamiento del material. La trilla se realizó manualmente. Posteriormente, la semilla se limpió mediante zarandas y un sistema de corriente de aire o blower, hasta separar los residuos y obtener la fracción considerada semilla limpia. La semilla se pesó antes y después de la limpieza, lo que permitió calcular el rendimiento sin limpiar, el rendimiento limpio y la proporción de material eliminado durante el proceso.
 
@@ -431,7 +431,7 @@ R_{\text{limpio}}\,(\mathrm{kg\,ha}^{-1})
 = \frac{\text{peso de semilla limpia (g)} \times 10}{0{,}76\,\mathrm{m}^2}
 $$
 
-El factor 10 convierte gramos por metro cuadrado en kilogramos por hectárea, mientras que 0,76 m² corresponde a la superficie total cosechada en cada parcela.
+El factor 10 convierte gramos por metro cuadrado en kilogramos por hectárea, mientras que $0,76 m²$ corresponde a la superficie total cosechada en cada parcela.
 
 La proporción de material eliminado durante la limpieza se calculó de la siguiente manera:
 
@@ -500,11 +500,11 @@ $$
 
 **Donde:**
 
-Rendimiento del tratamiento fertilizado corresponde al rendimiento de semilla limpia de cada tratamiento M1–M5, expresado en kg ha⁻¹.
+Rendimiento del tratamiento fertilizado corresponde al rendimiento de semilla limpia de cada tratamiento M1–M5, expresado en $kg ha⁻¹$.
 
-Rendimiento de M0 corresponde al rendimiento de semilla limpia del testigo sin nitrógeno experimental adicional del mismo bloque y ensayo, expresado en kg ha⁻¹.
+Rendimiento de M0 corresponde al rendimiento de semilla limpia del testigo sin nitrógeno experimental adicional del mismo bloque y ensayo, expresado en $kg ha⁻¹$.
 
-El valor 200 corresponde a la dosis total de nitrógeno experimental aplicada a los tratamientos fertilizados, expresada en kg N ha⁻¹.
+El valor 200 corresponde a la dosis total de nitrógeno experimental aplicada a los tratamientos fertilizados, expresada en $kg N ha⁻¹$.
 
 La eficiencia agronómica se expresó en kilogramos adicionales de semilla limpia producidos por kilogramo de nitrógeno experimental aplicado. Este indicador no representa la recuperación del fertilizante por el cultivo ni la eficiencia fisiológica de utilización del nitrógeno absorbido.
 
@@ -517,9 +517,9 @@ $$
 = \frac{R_{\text{limpio}}\,(\mathrm{kg\,ha}^{-1})}{\text{agua aportada (mm)}}
 $$
 
-Para el ensayo de secano se utilizó como denominador la precipitación registrada entre junio y noviembre, correspondiente a 510 mm.
+Para el ensayo de secano se utilizó como denominador la precipitación registrada entre junio y noviembre, correspondiente a $510 mm$.
 
-Para el ensayo bajo riego se utilizó la suma de las precipitaciones y del riego suplementario aplicado durante el mismo período, correspondiente a 675 mm.
+Para el ensayo bajo riego se utilizó la suma de las precipitaciones y del riego suplementario aplicado durante el mismo período, correspondiente a $675 mm$.
 
 La productividad aparente del agua se expresó en kilogramos de semilla limpia por hectárea y por milímetro de agua aportada.
 
@@ -553,11 +553,11 @@ Bⱼ representa el efecto del bloque j.
 
 Para las principales variables de respuesta se realizaron dos análisis complementarios dentro de cada ensayo.
 
-El análisis principal incluyó únicamente los tratamientos fertilizados M1–M5. Como todos recibieron una dosis total de 200 kg N ha⁻¹, esta comparación permitió evaluar específicamente el efecto del momento de aplicación.
+El análisis principal incluyó únicamente los tratamientos fertilizados M1–M5. Como todos recibieron una dosis total de $200 kg N ha⁻¹$, esta comparación permitió evaluar específicamente el efecto del momento de aplicación.
 
 De manera complementaria, se analizaron los seis tratamientos M0–M5 para describir la respuesta al nitrógeno experimental adicional y ubicar a los calendarios de aplicación respecto al testigo M0.
 
-Cuando el análisis de varianza detectó diferencias significativas entre tratamientos, las medias se compararon mediante la prueba de Tukey, con un nivel de significancia del 5 %.
+Cuando el análisis de varianza detectó diferencias significativas entre tratamientos, las medias se compararon mediante la prueba de Tukey, con un nivel de significancia del $5\%$.
 
 Cuando el efecto del tratamiento no resultó significativo, las diferencias numéricas entre medias se consideraron únicamente descriptivas.
 
@@ -587,7 +587,7 @@ No se dispuso de la concentración de nitrógeno correspondiente a M1, bloque 4,
 
 El análisis principal de la concentración de nitrógeno en secano para esa fecha se realizó con las 23 observaciones efectivamente medidas, sin imputar el dato faltante. En el análisis complementario conjunto se dispuso de 47 observaciones al considerar M0–M5 y de 39 al considerar únicamente M1–M5.
 
-Como análisis de sensibilidad, la observación faltante se estimó mediante la expresión $\hat{x} = \frac{rB + tT - G}{(r - 1)(t - 1)}$, correspondiente a un diseño de bloques completos al azar, donde r = 4 bloques, t = 6 tratamientos, B fue el total del bloque 4, T el total de M1 y G el total general. El valor estimado fue 2,485788 % de nitrógeno. La repetición de los análisis con este valor no modificó las conclusiones, por lo que la imputación se mantuvo exclusivamente como análisis de sensibilidad.
+Como análisis de sensibilidad, la observación faltante se estimó mediante la expresión $\hat{x} = \frac{rB + tT - G}{(r - 1)(t - 1)}$, correspondiente a un diseño de bloques completos al azar, donde r = 4 bloques, t = 6 tratamientos, B fue el total del bloque 4, T el total de M1 y G el total general. El valor estimado fue $2,485788\%$ de nitrógeno. La repetición de los análisis con este valor no modificó las conclusiones, por lo que la imputación se mantuvo exclusivamente como análisis de sensibilidad.
 
 En los análisis principales, las variables derivadas de esa concentración se calcularon únicamente para las unidades experimentales con información observada.
 
@@ -615,11 +615,11 @@ Debido a que cada condición hídrica estuvo representada por un único sector y
 
 ## 5.1 Condiciones hídricas y estado inicial de los ensayos
 
-Entre junio y noviembre de 2025 se registraron 510 mm de precipitación. La distribución mensual fue de 43 mm en junio, 62 mm en julio, 101 mm en agosto, 89 mm en septiembre, 141 mm en octubre y 74 mm en noviembre.
+Entre junio y noviembre de 2025 se registraron $510 mm$ de precipitación. La distribución mensual fue de $43 mm$ en junio, $62 mm$ en julio, $101 mm$ en agosto, $89 mm$ en septiembre, $141 mm$ en octubre y $74 mm$ en noviembre.
 
-El sector con riego suplementario recibió 165 mm adicionales, distribuidos en 15 mm durante junio, 30 mm en septiembre, 90 mm en octubre y 30 mm en noviembre. En consecuencia, el agua aportada durante el período evaluado fue de 510 mm en secano y de 675 mm en el sector regado.
+El sector con riego suplementario recibió $165 mm$ adicionales, distribuidos en $15 mm$ durante junio, $30 mm$ en septiembre, $90 mm$ en octubre y $30 mm$ en noviembre. En consecuencia, el agua aportada durante el período evaluado fue de $510 mm$ en secano y de $675 mm$ en el sector regado.
 
-La mayor lámina mensual de riego se aplicó en octubre, cuando se agregaron 90 mm a los 141 mm de precipitación registrados durante ese mes. Estos valores representan entradas de agua y no el consumo efectivo del cultivo.
+La mayor lámina mensual de riego se aplicó en octubre, cuando se agregaron $90 mm$ a los $141 mm$ de precipitación registrados durante ese mes. Estos valores representan entradas de agua y no el consumo efectivo del cultivo.
 
 **Tabla 2.** Precipitación y riego suplementario registrados entre junio y noviembre de 2025.
 
@@ -633,9 +633,9 @@ La mayor lámina mensual de riego se aplicó en octubre, cuando se agregaron 90 
 | Noviembre | 74 | 30 | 74 | 104 |
 | Total | 510 | 165 | 510 | 675 |
 
-En la evaluación inicial del 12 de junio de 2025, la biomasa aérea fue de 3,76 t MS ha⁻¹ en secano y de 3,78 t MS ha⁻¹ en el sector destinado a riego suplementario.
+En la evaluación inicial del 12 de junio de 2025, la biomasa aérea fue de $3,76\,\mathrm{t\,MS\,ha^{-1}}$ en secano y de $3,78\,\mathrm{t\,MS\,ha^{-1}}$ en el sector destinado a riego suplementario.
 
-La densidad inicial fue de 2526 macollos m⁻² en secano y de 2307 macollos m⁻² en el sector destinado a riego suplementario.
+La densidad inicial fue de $2526\,\mathrm{macollos\,m^{-2}}$ en secano y de $2307\,\mathrm{macollos\,m^{-2}}$ en el sector destinado a riego suplementario.
 
 Los valores iniciales fueron próximos entre sectores para las dos variables evaluadas, aunque esta similitud descriptiva no implica una equivalencia completa entre las áreas del semillero.
 
@@ -643,15 +643,15 @@ Los valores iniciales fueron próximos entre sectores para las dos variables eva
 
 La biomasa aérea se evaluó el 16 de septiembre, el 20 de octubre y el 12 de noviembre de 2025. El Tabla 3 presenta las medias de ambos sectores únicamente como síntesis descriptiva; la inferencia estadística se realizó por separado dentro de cada ensayo.
 
-El 16 de septiembre, M2 y M1 presentaron las mayores medias, con 9,48 y 7,89 t MS ha⁻¹, respectivamente. M3 y M4 alcanzaron valores próximos a 6,2 t MS ha⁻¹, mientras que M0 y M5 registraron 4,59 y 4,84 t MS ha⁻¹.
+El 16 de septiembre, M2 y M1 presentaron las mayores medias, con $9,48\,\mathrm{t\,MS\,ha^{-1}}$ y $7,89\,\mathrm{t\,MS\,ha^{-1}}$, respectivamente. M3 y M4 alcanzaron valores próximos a $6,2\,\mathrm{t\,MS\,ha^{-1}}$, mientras que M0 y M5 registraron $4,59\,\mathrm{t\,MS\,ha^{-1}}$ y $4,84\,\mathrm{t\,MS\,ha^{-1}}$.
 
 En términos descriptivos, las aplicaciones más tempranas se asociaron con una mayor acumulación inicial de biomasa. M5 todavía no había completado la dosis experimental al momento de este muestreo.
 
-El 20 de octubre, la biomasa aumentó en todos los tratamientos. M1–M4 presentaron medias entre 11,66 y 13,05 t MS ha⁻¹, M5 alcanzó 10,00 t MS ha⁻¹ y M0 registró 6,26 t MS ha⁻¹.
+El 20 de octubre, la biomasa aumentó en todos los tratamientos. M1–M4 presentaron medias entre $11,66\,\mathrm{t\,MS\,ha^{-1}}$ y $13,05\,\mathrm{t\,MS\,ha^{-1}}$, M5 alcanzó $10,00\,\mathrm{t\,MS\,ha^{-1}}$ y M0 registró $6,26\,\mathrm{t\,MS\,ha^{-1}}$.
 
 La separación numérica entre los tratamientos fertilizados fue menor que en septiembre, mientras que M0 mantuvo la menor acumulación de materia seca.
 
-El 12 de noviembre, M1 presentó la mayor media descriptiva, con 14,80 t MS ha⁻¹. M2, M3, M4, M5 y M0 alcanzaron 13,73; 13,39; 12,57; 11,35 y 10,59 t MS ha⁻¹, respectivamente.
+El 12 de noviembre, M1 presentó la mayor media descriptiva, con $14,80\,\mathrm{t\,MS\,ha^{-1}}$. M2, M3, M4, M5 y M0 alcanzaron $13,73\,\mathrm{t\,MS\,ha^{-1}}$, $13,39\,\mathrm{t\,MS\,ha^{-1}}$, $12,57\,\mathrm{t\,MS\,ha^{-1}}$, $11,35\,\mathrm{t\,MS\,ha^{-1}}$ y $10,59\,\mathrm{t\,MS\,ha^{-1}}$, respectivamente.
 
 Hacia el final del período evaluado, las diferencias numéricas entre los tratamientos fertilizados fueron menores que las observadas en septiembre.
 
@@ -723,17 +723,17 @@ Al considerar M0–M5, se detectaron diferencias significativas en las tres fech
 
 El 16 de septiembre se observaron las mayores diferencias entre los tratamientos fertilizados.
 
-En secano, las mayores acumulaciones correspondieron a M2 y M1, con 219,55 y 201,87 kg de nitrógeno por hectárea, respectivamente. Ambos tratamientos fueron significativamente superiores a M5 y M0. M3 y M4 presentaron valores intermedios, mientras que M0 registró la menor acumulación, con 51,15 kg de nitrógeno por hectárea.
+En secano, las mayores acumulaciones correspondieron a M2 y M1, con 219,55 y $201,87 kg de nitrógeno por hectárea$, respectivamente. Ambos tratamientos fueron significativamente superiores a M5 y M0. M3 y M4 presentaron valores intermedios, mientras que M0 registró la menor acumulación, con $51,15 kg de nitrógeno por hectárea$.
 
-Bajo riego, M2 presentó la mayor acumulación, con 197,38 kg de nitrógeno por hectárea, y fue significativamente superior a M3, M4, M5 y M0. M1 acumuló 177,78 kg de nitrógeno por hectárea y presentó un comportamiento intermedio. El menor valor correspondió a M0, con 61,60 kg de nitrógeno por hectárea.
+Bajo riego, M2 presentó la mayor acumulación, con $197,38 kg de nitrógeno por hectárea$, y fue significativamente superior a M3, M4, M5 y M0. M1 acumuló $177,78 kg de nitrógeno por hectárea$ y presentó un comportamiento intermedio. El menor valor correspondió a M0, con $61,60 kg de nitrógeno por hectárea$.
 
 Cuando se consideraron únicamente M1–M5, se mantuvieron diferencias significativas en ambos ensayos. En secano, M1 y M2 superaron significativamente a M5, mientras que M3 y M4 presentaron valores intermedios. Bajo riego, M2 superó a M3, M4 y M5, mientras que M1 presentó una respuesta intermedia.
 
 En septiembre, las aplicaciones tempranas presentaron las mayores acumulaciones. M5 todavía no había recibido la segunda aplicación prevista para el 20 de septiembre, por lo que la comparación reflejó también diferencias transitorias en la dosis acumulada hasta el muestreo.
 
-El 20 de octubre se detectaron diferencias significativas entre los seis tratamientos en ambos ensayos. En secano, el nitrógeno acumulado varió entre 174,09 kg por hectárea en M5 y 206,25 kg por hectárea en M4, mientras que M0 acumuló 69,19 kg por hectárea. Todos los tratamientos fertilizados fueron significativamente superiores al testigo.
+El 20 de octubre se detectaron diferencias significativas entre los seis tratamientos en ambos ensayos. En secano, el nitrógeno acumulado varió entre $174,09 kg por hectárea$ en M5 y $206,25 kg por hectárea$ en M4, mientras que M0 acumuló $69,19 kg por hectárea$. Todos los tratamientos fertilizados fueron significativamente superiores al testigo.
 
-Bajo riego se observó el mismo patrón. Los tratamientos fertilizados acumularon entre 154,90 y 211,39 kg de nitrógeno por hectárea, mientras que M0 registró 61,13 kg por hectárea. Todos los tratamientos fertilizados fueron significativamente superiores al testigo.
+Bajo riego se observó el mismo patrón. Los tratamientos fertilizados acumularon entre 154,90 y $211,39 kg de nitrógeno por hectárea$, mientras que M0 registró $61,13 kg por hectárea$. Todos los tratamientos fertilizados fueron significativamente superiores al testigo.
 
 **Tabla 7.** Nitrógeno acumulado en la biomasa aérea el 20 de octubre según tratamiento y sector.
 
@@ -746,15 +746,15 @@ Bajo riego se observó el mismo patrón. Los tratamientos fertilizados acumularo
 | M4 | 206,25 a | 202,99 a |
 | M5 | 174,09 a | 207,22 a |
 
-Dentro de cada ensayo, las medias seguidas por una misma letra no difieren significativamente según la prueba de Tukey al 5 %, considerando el análisis M0–M5.
+Dentro de cada ensayo, las medias seguidas por una misma letra no difieren significativamente según la prueba de Tukey al $5\%$, considerando el análisis M0–M5.
 
 Al considerar únicamente los tratamientos fertilizados, no se detectaron diferencias significativas en secano ni bajo riego. Por lo tanto, las diferencias entre momentos observadas en septiembre habían desaparecido hacia octubre, una vez que todos los tratamientos completaron la dosis total de nitrógeno experimental.
 
 El 12 de noviembre se mantuvieron las diferencias significativas entre los seis tratamientos en ambos ensayos.
 
-En secano, todos los tratamientos fertilizados presentaron acumulaciones significativamente superiores a M0. Los valores de M1–M5 variaron entre 135,69 y 165,51 kg de nitrógeno por hectárea, mientras que el testigo acumuló 83,72 kg por hectárea.
+En secano, todos los tratamientos fertilizados presentaron acumulaciones significativamente superiores a M0. Los valores de M1–M5 variaron entre 135,69 y $165,51 kg de nitrógeno por hectárea$, mientras que el testigo acumuló $83,72 kg por hectárea$.
 
-Bajo riego, las mayores acumulaciones correspondieron a M4, M1 y M2, con 169,60; 163,91 y 156,89 kg de nitrógeno por hectárea, respectivamente. Estos tratamientos fueron significativamente superiores a M0, que acumuló 100,71 kg por hectárea. M3 y M5 presentaron valores intermedios.
+Bajo riego, las mayores acumulaciones correspondieron a M4, M1 y M2, con 169,60; 163,91 y $156,89 kg de nitrógeno por hectárea$, respectivamente. Estos tratamientos fueron significativamente superiores a M0, que acumuló $100,71 kg por hectárea$. M3 y M5 presentaron valores intermedios.
 
 **Tabla 8.** Nitrógeno acumulado en la biomasa aérea el 12 de noviembre según tratamiento y sector.
 
@@ -767,7 +767,7 @@ Bajo riego, las mayores acumulaciones correspondieron a M4, M1 y M2, con 169,60;
 | M4 | 163,67 a | 169,60 a |
 | M5 | 135,69 a | 146,93 ab |
 
-Dentro de cada ensayo, las medias seguidas por una misma letra no difieren significativamente según la prueba de Tukey al 5 %, considerando el análisis M0–M5.
+Dentro de cada ensayo, las medias seguidas por una misma letra no difieren significativamente según la prueba de Tukey al $5\%$, considerando el análisis M0–M5.
 
 Cuando se analizaron exclusivamente los tratamientos fertilizados, no se detectaron diferencias significativas en secano ni bajo riego. En secano se observó un efecto significativo del bloque, lo que indicó la existencia de variación espacial entre las repeticiones, separada del efecto de los tratamientos mediante el diseño experimental.
 
@@ -818,7 +818,7 @@ No se detectó una interacción significativa entre momento y sector el 16 de se
 
 El 20 de octubre se mantuvieron diferencias significativas entre los tratamientos fertilizados. Los valores más elevados se desplazaron hacia M5 y M4, con índices de 1,27 y 1,25, respectivamente. M1 y M2 presentaron un valor medio de 1,11, mientras que M3 alcanzó 1,05.
 
-El cambio en el orden de los tratamientos fue consistente con un desplazamiento temporal del estado nitrogenado. La interacción momento × sector presentó p = 0,0508, resultado próximo pero superior al nivel de significancia adoptado.
+El cambio en el orden de los tratamientos fue consistente con un desplazamiento temporal del estado nitrogenado. La interacción momento × sector presentó $p = 0,0508$, resultado próximo pero superior al nivel de significancia adoptado.
 
 El 12 de noviembre también se detectaron diferencias significativas entre los tratamientos fertilizados. M4 presentó el mayor valor, con 0,98, mientras que M3 registró el menor, con 0,79. M1 y M5 alcanzaron 0,88 y M2 presentó un valor de 0,89.
 
@@ -850,15 +850,15 @@ A pesar de la diferencia en magnitud, el patrón temporal general se mantuvo. Po
 
 La densidad de panojas se determinó al final del ciclo y se analizó por separado en los sectores de secano y riego suplementario.
 
-Al considerar M0–M5, se detectaron diferencias significativas en secano (p = 0,0164) y en el sector regado (p = 0,0085).
+Al considerar M0–M5, se detectaron diferencias significativas en secano ($p = 0,0164$) y en el sector regado ($p = 0,0085$).
 
-En secano, M1 y M2 presentaron 876,0 y 850,0 panojas m⁻², respectivamente, y superaron significativamente a M0, que alcanzó 634,5 panojas m⁻². M3, M4 y M5 mostraron valores intermedios.
+En secano, M1 y M2 presentaron $876,0\,\mathrm{panojas\,m^{-2}}$ y $850,0\,\mathrm{panojas\,m^{-2}}$, respectivamente, y superaron significativamente a M0, que alcanzó $634,5\,\mathrm{panojas\,m^{-2}}$. M3, M4 y M5 mostraron valores intermedios.
 
-Entre M1–M5 no se detectaron diferencias significativas en secano (p = 0,0945), aunque M1 y M2 mantuvieron las mayores medias descriptivas.
+Entre M1–M5 no se detectaron diferencias significativas en secano ($p = 0,0945$), aunque M1 y M2 mantuvieron las mayores medias descriptivas.
 
-En el sector regado, M1, M3 y M2 presentaron 800,3; 761,2 y 757,6 panojas m⁻², respectivamente, y superaron significativamente a M5, que alcanzó 527,6 panojas m⁻². M0 y M4 ocuparon posiciones intermedias.
+En el sector regado, M1, M3 y M2 presentaron $800,3\,\mathrm{panojas\,m^{-2}}$, $761,2\,\mathrm{panojas\,m^{-2}}$ y $757,6\,\mathrm{panojas\,m^{-2}}$, respectivamente, y superaron significativamente a M5, que alcanzó $527,6\,\mathrm{panojas\,m^{-2}}$. M0 y M4 ocuparon posiciones intermedias.
 
-Entre M1–M5 se mantuvieron diferencias significativas en el sector regado (p = 0,0053): M1, M2 y M3 superaron a M5, mientras que M4 presentó una respuesta intermedia.
+Entre M1–M5 se mantuvieron diferencias significativas en el sector regado ($p = 0,0053$): M1, M2 y M3 superaron a M5, mientras que M4 presentó una respuesta intermedia.
 
 **Tabla 12.** Densidad de panojas según tratamiento y sector.
 
@@ -879,13 +879,13 @@ En conjunto, las aplicaciones tempranas e intermedias favorecieron la densidad d
 
 El número de semillas por panoja se estimó a partir del peso de semilla limpia, el peso de mil semillas y el número de panojas registrado en cada unidad experimental.
 
-Al considerar M0–M5, se detectaron diferencias significativas en secano (p = 0,0007) y en el sector regado (p &lt; 0,0001).
+Al considerar M0–M5, se detectaron diferencias significativas en secano ($p = 0,0007$) y en el sector regado ($p < 0,0001$).
 
-En secano, M0 presentó 45,11 semillas por panoja. M1, M3, M4 y M5 superaron significativamente a M0, mientras que M2 presentó una respuesta intermedia y no se diferenció ni de M0 ni de los demás tratamientos fertilizados.
+En secano, M0 presentó $45,11\,\mathrm{semillas\,panoja^{-1}}$. M1, M3, M4 y M5 superaron significativamente a M0, mientras que M2 presentó una respuesta intermedia y no se diferenció ni de M0 ni de los demás tratamientos fertilizados.
 
-En el sector regado, M4 presentó la mayor media, con 92,18 semillas por panoja, y superó a M1 y M0 en el análisis M0–M5. M2, M3 y M5 ocuparon posiciones intermedias.
+En el sector regado, M4 presentó la mayor media, con $92,18\,\mathrm{semillas\,panoja^{-1}}$, y superó a M1 y M0 en el análisis M0–M5. M2, M3 y M5 ocuparon posiciones intermedias.
 
-Entre M1–M5 no se detectaron diferencias en secano (p = 0,1496). En el sector regado sí se detectaron diferencias (p = 0,0088): M4 y M5 superaron a M1, mientras que M2 y M3 ocuparon posiciones intermedias.
+Entre M1–M5 no se detectaron diferencias en secano ($p = 0,1496$). En el sector regado sí se detectaron diferencias ($p = 0,0088$): M4 y M5 superaron a M1, mientras que M2 y M3 ocuparon posiciones intermedias.
 
 **Tabla 13.** Número estimado de semillas por panoja según tratamiento y sector.
 
@@ -906,9 +906,9 @@ Esta variable comparte matemáticamente el rendimiento de semilla limpia y no co
 
 ### 5.5.3 Peso de mil semillas
 
-El peso de mil semillas no fue afectado significativamente por los tratamientos en secano (p = 0,5728) ni en el sector regado (p = 0,8385).
+El peso de mil semillas no fue afectado significativamente por los tratamientos en secano ($p = 0,5728$) ni en el sector regado ($p = 0,8385$).
 
-Las medias variaron entre 2,35 y 2,50 g en secano y entre 2,23 y 2,42 g en el sector regado.
+Las medias variaron entre $2,35$ y $2,50$ g en secano y entre $2,23$ y $2,42$ g en el sector regado.
 
 **Tabla 14.** Peso de mil semillas según tratamiento y sector.
 
@@ -927,13 +927,13 @@ La respuesta de los componentes del rendimiento se expresó, por lo tanto, princ
 
 ## 5.6 Rendimiento de semilla limpia
 
-La comparación principal entre M1–M5 no detectó diferencias significativas de rendimiento asociadas con el momento de aplicación: p = 0,4287 en secano y p = 0,1759 en el sector regado.
+La comparación principal entre M1–M5 no detectó diferencias significativas de rendimiento asociadas con el momento de aplicación: $p = 0,4287$ en secano y $p = 0,1759$ en el sector regado.
 
-Entre los tratamientos fertilizados, las medias variaron de 1273,68 a 1470,72 kg ha⁻¹ en secano y de 1152,63 a 1452,30 kg ha⁻¹ en el sector regado.
+Entre los tratamientos fertilizados, las medias variaron de $1273,68$ a $1470,72 kg ha⁻¹$ en secano y de $1152,63$ a $1452,30 kg ha⁻¹$ en el sector regado.
 
 M4 presentó la mayor media descriptiva en secano y M2 en el sector regado; M5 registró la menor media en ambos sectores. Estas diferencias numéricas no definieron un calendario de aplicación superior.
 
-Como análisis complementario, al considerar M0–M5 el efecto del tratamiento fue significativo en ambos sectores (p &lt; 0,0001).
+Como análisis complementario, al considerar M0–M5 el efecto del tratamiento fue significativo en ambos sectores ($p < 0,0001$).
 
 **Tabla 15.** Rendimiento de semilla limpia según tratamiento y sector.
 
@@ -950,9 +950,9 @@ Como análisis complementario, al considerar M0–M5 el efecto del tratamiento f
 
 Los valores corresponden a medias de cuatro repeticiones. Dentro de cada sector, las medias seguidas por una misma letra no difieren según Tukey (p &gt; 0,05).
 
-El promedio de M1–M5 fue de 1365,79 kg ha⁻¹ en secano y de 1285,66 kg ha⁻¹ en el sector regado, frente a 702,63 y 645,39 kg ha⁻¹ en M0, respectivamente.
+El promedio de M1–M5 fue de $1365,79 kg ha⁻¹$ en secano y de $1285,66 kg ha⁻¹$ en el sector regado, frente a $702,63$ y $645,39 kg ha⁻¹$ en M0, respectivamente.
 
-En relación con M0, el rendimiento medio de los tratamientos fertilizados aumentó 94,4 % en secano y 99,2 % en el sector regado.
+En relación con M0, el rendimiento medio de los tratamientos fertilizados aumentó $94,4\%$ en secano y $99,2\%$ en el sector regado.
 
 Todos los tratamientos fertilizados superaron significativamente a M0; esta comparación confirmó la respuesta al nitrógeno experimental adicional, aunque no fue la pregunta principal del experimento.
 
@@ -964,11 +964,11 @@ La diferencia media entre sectores se consideró descriptiva.
 
 El índice de cosecha expresó la proporción de la biomasa aérea final representada por la semilla limpia.
 
-No se detectaron diferencias significativas entre tratamientos en secano (p = 0,0654) ni en el sector regado (p = 0,0599). Ambos valores fueron próximos, pero superiores, al nivel de significancia adoptado.
+No se detectaron diferencias significativas entre tratamientos en secano ($p = 0,0654$) ni en el sector regado ($p = 0,0599$). Ambos valores fueron próximos, pero superiores, al nivel de significancia adoptado.
 
-En secano, las medias variaron entre 7,66 % en M0 y 12,29 % en M4.
+En secano, las medias variaron entre $7,66\%$ en M0 y $12,29\%$ en M4.
 
-En el sector regado, las medias variaron entre 6,11 % en M0 y 10,71 % en M2.
+En el sector regado, las medias variaron entre $6,11\%$ en M0 y $10,71\%$ en M2.
 
 **Tabla 16.** Índice de cosecha según tratamiento y sector.
 
@@ -992,11 +992,11 @@ M4 en secano y M2 en el sector regado combinaron descriptivamente los mayores re
 
 La merma de limpieza expresó la proporción del peso inicial de la muestra eliminada durante el proceso de limpieza.
 
-No se detectaron diferencias significativas entre tratamientos en secano (p = 0,3085) ni en el sector regado (p = 0,0748).
+No se detectaron diferencias significativas entre tratamientos en secano ($p = 0,3085$) ni en el sector regado ($p = 0,0748$).
 
-En secano, la merma varió entre 14,87 % en M5 y 17,25 % en M1.
+En secano, la merma varió entre $14,87\%$ en M5 y $17,25\%$ en M1.
 
-En el sector regado, la merma varió entre 17,21 % en M5 y 23,60 % en M0. Algunos tratamientos fertilizados presentaron medias menores que M0, pero las diferencias no alcanzaron significancia estadística.
+En el sector regado, la merma varió entre $17,21\%$ en M5 y $23,60\%$ en M0. Algunos tratamientos fertilizados presentaron medias menores que M0, pero las diferencias no alcanzaron significancia estadística.
 
 **Tabla 17.** Merma de limpieza según tratamiento y sector.
 
@@ -1016,11 +1016,11 @@ No se obtuvo evidencia suficiente para atribuir al momento de aplicación difere
 
 ## 5.9 Eficiencia agronómica del nitrógeno
 
-La eficiencia agronómica se calculó para M1–M5 como el incremento del rendimiento respecto a M0 del mismo bloque y sector, dividido entre los 200 kg N ha⁻¹ aplicados experimentalmente.
+La eficiencia agronómica se calculó para M1–M5 como el incremento del rendimiento respecto a M0 del mismo bloque y sector, dividido entre los $200 kg N ha⁻¹$ aplicados experimentalmente.
 
-En secano, la eficiencia agronómica varió entre 2,86 kg de semilla kg⁻¹ N en M5 y 3,84 kg de semilla kg⁻¹ N en M4.
+En secano, la eficiencia agronómica varió entre $2,86 kg de semilla kg⁻¹ N$ en M5 y $3,84 kg de semilla kg⁻¹ N$ en M4.
 
-En el sector regado, los valores variaron entre 2,54 kg de semilla kg⁻¹ N en M5 y 4,03 kg de semilla kg⁻¹ N en M2.
+En el sector regado, los valores variaron entre $2,54 kg de semilla kg⁻¹ N$ en M5 y $4,03 kg de semilla kg⁻¹ N$ en M2.
 
 **Tabla 18.** Eficiencia agronómica del nitrógeno según tratamiento y sector.
 
@@ -1033,7 +1033,7 @@ En el sector regado, los valores variaron entre 2,54 kg de semilla kg⁻¹ N en 
 | M5 | 2,86 | 2,54 |
 | Promedio | 3,32 | 3,20 |
 
-No se detectaron diferencias significativas entre momentos en secano (p = 0,4287) ni en el sector regado (p = 0,1759).
+No se detectaron diferencias significativas entre momentos en secano ($p = 0,4287$) ni en el sector regado ($p = 0,1759$).
 
 M4 presentó la mayor media descriptiva en secano y M2 en el sector regado; M5 registró la menor en ambos sectores.
 
@@ -1045,13 +1045,13 @@ El momento de aplicación no modificó significativamente la cantidad adicional 
 
 La productividad aparente del agua aportada relacionó el rendimiento de semilla limpia con el agua registrada entre junio y noviembre de 2025.
 
-El denominador fue de 510 mm en secano y de 675 mm en el sector regado.
+El denominador fue de $510 mm$ en secano y de $675 mm$ en el sector regado.
 
-Al considerar M0–M5, se detectaron diferencias significativas en ambos sectores (p &lt; 0,0001).
+Al considerar M0–M5, se detectaron diferencias significativas en ambos sectores ($p < 0,0001$).
 
-En secano, M0 presentó 1,38 kg de semilla ha⁻¹ mm⁻¹ y los tratamientos fertilizados variaron entre 2,50 y 2,88 kg de semilla ha⁻¹ mm⁻¹.
+En secano, M0 presentó $1,38$ kg de semilla ha⁻¹ mm⁻¹ y los tratamientos fertilizados variaron entre $2,50$ y $2,88$ kg de semilla ha⁻¹ mm⁻¹.
 
-En el sector regado, M0 presentó 0,96 kg de semilla ha⁻¹ mm⁻¹ y M1–M5 variaron entre 1,71 y 2,15 kg de semilla ha⁻¹ mm⁻¹.
+En el sector regado, M0 presentó $0,96$ kg de semilla ha⁻¹ mm⁻¹ y M1–M5 variaron entre $1,71$ y $2,15$ kg de semilla ha⁻¹ mm⁻¹.
 
 **Tabla 19.** Productividad aparente del agua aportada según tratamiento y sector.
 
@@ -1069,7 +1069,7 @@ Los valores corresponden a medias de cuatro repeticiones. Dentro de cada sector,
 
 Todos los tratamientos fertilizados superaron a M0, como consecuencia directa de su mayor rendimiento y del uso de un denominador común dentro de cada sector.
 
-Entre M1–M5 no se detectaron diferencias significativas en secano (p = 0,4287) ni en el sector regado (p = 0,1759).
+Entre M1–M5 no se detectaron diferencias significativas en secano ($p = 0,4287$) ni en el sector regado ($p = 0,1759$).
 
 El momento de aplicación no modificó significativamente la cantidad de semilla producida por unidad de agua aportada.
 
@@ -1100,35 +1100,35 @@ Los análisis por sector incluyeron 24 observaciones y el análisis conjunto inc
 
 ### 5.11.1 Relaciones con los componentes del rendimiento
 
-El rendimiento se correlacionó positiva y significativamente con la densidad de panojas en secano (r = 0,606; p = 0,0017) y en el sector regado (r = 0,440; p = 0,0316).
+El rendimiento se correlacionó positiva y significativamente con la densidad de panojas en secano ($r = 0,606$; $p = 0,0017$) y en el sector regado ($r = 0,440$; $p = 0,0316$).
 
 La asociación fue numéricamente mayor en secano, aunque los coeficientes no fueron comparados mediante una prueba estadística específica.
 
-El número estimado de semillas por panoja presentó asociaciones positivas de magnitud similar en secano (r = 0,758) y en el sector regado (r = 0,760), con p &lt; 0,0001 en ambos casos.
+El número estimado de semillas por panoja presentó asociaciones positivas de magnitud similar en secano ($r = 0,758$) y en el sector regado ($r = 0,760$), con $p < 0,0001$ en ambos casos.
 
 Esta asociación debe interpretarse con cautela porque el número de semillas por panoja fue estimado utilizando el rendimiento de semilla limpia, el peso de mil semillas y el número de panojas; por lo tanto, no constituye una variable independiente del rendimiento.
 
-El peso de mil semillas no se correlacionó significativamente con el rendimiento en secano (r = 0,242; p = 0,2547) ni en el sector regado (r = 0,044; p = 0,8378).
+El peso de mil semillas no se correlacionó significativamente con el rendimiento en secano ($r = 0,242$; $p = 0,2547$) ni en el sector regado ($r = 0,044$; $p = 0,8378$).
 
 ### 5.11.2 Relaciones con la biomasa y el estado nitrogenado
 
-La biomasa aérea final se correlacionó con el rendimiento en secano (r = 0,626; p = 0,0011), pero no en el sector regado (r = 0,286; p = 0,1754).
+La biomasa aérea final se correlacionó con el rendimiento en secano ($r = 0,626$; $p = 0,0011$), pero no en el sector regado ($r = 0,286$; $p = 0,1754$).
 
-La concentración de nitrógeno se correlacionó positivamente con el rendimiento en secano (r = 0,565; p = 0,0040) y en el sector regado (r = 0,531; p = 0,0077).
+La concentración de nitrógeno se correlacionó positivamente con el rendimiento en secano ($r = 0,565$; $p = 0,0040$) y en el sector regado ($r = 0,531$; $p = 0,0077$).
 
-El nitrógeno acumulado presentó una asociación positiva en secano (r = 0,791; p &lt; 0,0001) y en el sector regado (r = 0,583; p = 0,0028).
+El nitrógeno acumulado presentó una asociación positiva en secano ($r = 0,791$; $p < 0,0001$) y en el sector regado ($r = 0,583$; $p = 0,0028$).
 
 Este indicador integra matemáticamente la biomasa y la concentración de nitrógeno, por lo que no constituye una medición independiente de ambas variables.
 
 ### 5.11.3 Relaciones con el índice de cosecha y la merma de limpieza
 
-El índice de cosecha se correlacionó positivamente con el rendimiento en secano (r = 0,606; p = 0,0017) y en el sector regado (r = 0,794; p &lt; 0,0001).
+El índice de cosecha se correlacionó positivamente con el rendimiento en secano ($r = 0,606$; $p = 0,0017$) y en el sector regado ($r = 0,794$; $p < 0,0001$).
 
 La asociación de mayor magnitud en el sector regado correspondió al índice de cosecha.
 
 Esta relación debe interpretarse con cautela, debido a que el rendimiento de semilla limpia forma parte del numerador utilizado para calcular el índice de cosecha. En consecuencia, ambas variables presentan una dependencia matemática parcial.
 
-La merma de limpieza se correlacionó negativamente con el rendimiento en secano (r = −0,415; p = 0,0439) y en el sector regado (r = −0,521; p = 0,0091).
+La merma de limpieza se correlacionó negativamente con el rendimiento en secano ($r = -0,415$; $p = 0,0439$) y en el sector regado ($r = -0,521$; $p = 0,0091$).
 
 Las parcelas con mayor proporción de material eliminado durante la limpieza tendieron a presentar menor rendimiento de semilla limpia. Esta asociación debe interpretarse con cautela porque el peso de semilla limpia también interviene en el cálculo de la merma.
 
@@ -1140,13 +1140,13 @@ La pregunta central fue si el desplazamiento temporal de una misma dosis total d
 
 Las mayores medias descriptivas correspondieron a M4 en secano y a M2 en el sector regado, mientras que M5 presentó la menor media en ambos sectores. Como el orden de los tratamientos no fue consistente y las diferencias no alcanzaron significancia estadística, estos valores no sustentan una recomendación de fecha específica.
 
-Como referencia complementaria, todos los tratamientos fertilizados superaron significativamente a M0. El promedio de M1–M5 fue de 1365,79 frente a 702,63 kg ha⁻¹ en secano y de 1285,66 frente a 645,39 kg ha⁻¹ en el sector regado, con aumentos de 94,4 y 99,2 %, respectivamente. M0 representó un testigo sin nitrógeno experimental adicional, no una condición de ausencia total del nutriente, porque todo el semillero recibió fertilizaciones generales.
+Como referencia complementaria, todos los tratamientos fertilizados superaron significativamente a M0. El promedio de M1–M5 fue de $1365,79$ frente a $702,63 kg ha⁻¹$ en secano y de $1285,66$ frente a $645,39 kg ha⁻¹$ en el sector regado, con aumentos de $94,4$ y $99,2\%$, respectivamente. M0 representó un testigo sin nitrógeno experimental adicional, no una condición de ausencia total del nutriente, porque todo el semillero recibió fertilizaciones generales.
 
 La marcada diferencia respecto a M0 coincide, en términos generales, con antecedentes que señalan una elevada sensibilidad de la producción de semilla de festuca alta a la disponibilidad de nitrógeno. Bazzigalupi y Bertín [-@bazzigalupi2014] también observaron que la dosis produjo una respuesta más consistente que la distribución de la aplicación, aunque la comparación debe realizarse con cautela por las diferencias de cultivar, ambiente, edad del semillero y manejo.
 
-Como se evaluó una única dosis experimental, no fue posible construir una curva de respuesta ni determinar si 200 kg N ha⁻¹ correspondieron a un nivel óptimo desde el punto de vista biológico o económico. Una recomendación productiva requeriría evaluar otras dosis e incorporar costos, valor de la semilla y riesgos de pérdidas, vuelco y cosecha.
+Como se evaluó una única dosis experimental, no fue posible construir una curva de respuesta ni determinar si $200 kg N ha⁻¹$ correspondieron a un nivel óptimo desde el punto de vista biológico o económico. Una recomendación productiva requeriría evaluar otras dosis e incorporar costos, valor de la semilla y riesgos de pérdidas, vuelco y cosecha.
 
-La eficiencia agronómica media fue de 3,32 kg adicionales de semilla kg⁻¹ N en secano y de 3,20 kg adicionales de semilla kg⁻¹ N en el sector regado. Como todos los tratamientos fertilizados recibieron la misma dosis, este indicador reprodujo el patrón del rendimiento y tampoco permitió diferenciar los momentos de aplicación.
+La eficiencia agronómica media fue de $3,32 kg adicionales de semilla kg⁻¹ N$ en secano y de $3,20 kg adicionales de semilla kg⁻¹ N$ en el sector regado. Como todos los tratamientos fertilizados recibieron la misma dosis, este indicador reprodujo el patrón del rendimiento y tampoco permitió diferenciar los momentos de aplicación.
 
 En síntesis, el momento de aplicación no modificó significativamente el rendimiento entre M1–M5. La comparación con M0 confirmó la respuesta a la dosis experimental adicional, pero no permite definir una dosis óptima ni desplaza el objetivo principal del estudio.
 
@@ -1186,7 +1186,7 @@ En consecuencia, los resultados muestran relaciones contrastantes entre los comp
 
 ## 6.4 Condición hídrica y productividad aparente del agua
 
-Entre junio y noviembre se registraron 510 mm de precipitación y el sector regado recibió 165 mm adicionales. El agua aportada fue, por lo tanto, de 510 mm en secano y 675 mm en el sector con riego suplementario.
+Entre junio y noviembre se registraron $510 mm$ de precipitación y el sector regado recibió $165 mm$ adicionales. El agua aportada fue, por lo tanto, de $510 mm$ en secano y $675 mm$ en el sector con riego suplementario.
 
 Los rendimientos medios del sector regado no fueron consistentemente superiores a los de secano. Como cada régimen hídrico ocupó un único sector, estas diferencias pudieron responder tanto al agua aplicada como a variaciones espaciales de suelo, implantación o estado inicial; por ello, la comparación entre sectores fue descriptiva.
 
@@ -1236,7 +1236,7 @@ En conjunto, las correlaciones complementan los análisis de varianza, pero no m
 
 ## 6.7 Alcance, limitaciones e implicancias agronómicas
 
-Los resultados corresponden a un único ciclo, un sitio, un semillero establecido del cultivar Rizar y una dosis experimental de 200 kg N ha⁻¹. Por lo tanto, no deben generalizarse automáticamente a otros años, regiones, cultivares, edades del semillero, suelos o niveles de fertilización.
+Los resultados corresponden a un único ciclo, un sitio, un semillero establecido del cultivar Rizar y una dosis experimental de $200 kg N ha⁻¹$. Por lo tanto, no deben generalizarse automáticamente a otros años, regiones, cultivares, edades del semillero, suelos o niveles de fertilización.
 
 La evaluación de una sola dosis impidió determinar una respuesta óptima biológica o económica. Además, todas las parcelas habían recibido fertilizaciones generales, de modo que M0 representó un testigo sin nitrógeno experimental adicional y no una condición de ausencia total.
 
@@ -1270,7 +1270,7 @@ En conjunto, los calendarios modificaron la trayectoria de crecimiento, nutrici�
 
 # 7. Conclusiones
 
-Entre M1–M5, que recibieron la misma dosis total de 200 kg N ha⁻¹, no se detectaron diferencias significativas en el rendimiento de semilla limpia. Dentro de las fechas estudiadas no fue posible identificar un momento de aplicación consistentemente superior.
+Entre M1–M5, que recibieron la misma dosis total de $200 kg N ha⁻¹$, no se detectaron diferencias significativas en el rendimiento de semilla limpia. Dentro de las fechas estudiadas no fue posible identificar un momento de aplicación consistentemente superior.
 
 Las aplicaciones tempranas adelantaron la acumulación de biomasa y nitrógeno y tendieron a favorecer la densidad de panojas. Las aplicaciones intermedias y tardías mantuvieron mayores concentraciones relativas de nitrógeno hacia etapas posteriores y tendieron a presentar más semillas estimadas por panoja.
 
