@@ -248,6 +248,7 @@ def _analysis_steps(
     from scipy import stats
 
     from festuca_analysis.plotting import (
+        CATEGORICAL_ERRORBAR_CAPSIZE,
         DATA_LINEWIDTH,
         ERRORBAR_CAPSIZE,
         INTERVAL_LINEWIDTH,
@@ -1193,27 +1194,54 @@ def _analysis_steps(
     display_output(water_inputs)
 
     positions = np.arange(len(water_inputs), dtype=float)
+    bar_width = 0.28
+    bar_offset = 0.18
+    precipitation_positions = positions - bar_offset
+    irrigated_positions = positions + bar_offset
+    precipitation_color = PLOT_PALETTE[0]
+    irrigation_color = PLOT_PALETTE[6]
     fig, ax = mpl.subplots(figsize=(10.8, 5.7))
     ax.bar(
-        positions,
+        precipitation_positions,
         water_inputs["precipitation_mm"],
-        width=0.68,
-        color=PLOT_PALETTE[0],
+        width=bar_width,
+        color=precipitation_color,
         label="Precipitación (ambos sectores)",
     )
     ax.bar(
-        positions,
+        irrigated_positions,
         water_inputs["supplemental_irrigation_mm"],
-        width=0.68,
+        width=bar_width,
         bottom=water_inputs["precipitation_mm"],
-        color=PLOT_PALETTE[1],
+        color=irrigation_color,
         label="Riego suplementario",
     )
-    for position, total in zip(
+    for position, precipitation, irrigation, total in zip(
         positions,
-        water_inputs["irrigated_total_mm"],
+        water_inputs["precipitation_mm"].to_numpy(dtype=float),
+        water_inputs["supplemental_irrigation_mm"].to_numpy(dtype=float),
+        water_inputs["irrigated_total_mm"].to_numpy(dtype=float),
         strict=True,
     ):
+        if irrigation > 0:
+            ax.text(
+                position - bar_offset,
+                precipitation + 3,
+                f"{precipitation:.0f}",
+                ha="center",
+                va="bottom",
+                fontsize=8.5,
+                color=precipitation_color,
+            )
+            ax.text(
+                position + bar_offset,
+                precipitation + irrigation / 2,
+                f"+{irrigation:.0f}",
+                ha="center",
+                va="center",
+                fontsize=8.5,
+                color="white",
+            )
         ax.text(
             position,
             total + 5,
@@ -1252,8 +1280,10 @@ def _analysis_steps(
     add_figure_note(
         fig,
         (
-            "Las etiquetas sobre las barras son los totales mensuales del sector regado. "
-            "Los aportes brutos no equivalen al agua efectivamente utilizada por el cultivo."
+            "La barra naranja desplazada representa exclusivamente el riego suplementario y comienza "
+            "a la altura de la precipitación común. El total mensual del sector regado aparece centrado; "
+            "cuando hubo riego también se indican por separado la precipitación y el aporte adicional. "
+            "Los aportes brutos no equivalen al agua utilizada por el cultivo."
         ),
     )
     fig.subplots_adjust(
@@ -1625,7 +1655,7 @@ def _analysis_steps(
                 markers="o",
                 linestyles="none",
                 native_scale=True,
-                capsize=0.12,
+                capsize=CATEGORICAL_ERRORBAR_CAPSIZE,
                 err_kws={"linewidth": INTERVAL_LINEWIDTH},
                 markersize=MARKER_SIZE,
                 legend=False,
