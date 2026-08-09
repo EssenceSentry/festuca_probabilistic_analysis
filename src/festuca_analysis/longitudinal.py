@@ -1,25 +1,171 @@
-from __future__ import annotations
+"""Workbook-first classical and longitudinal analysis for the Festuca thesis.
 
-"""Classical and longitudinal analyses behind the thesis report.
-
-The public class intentionally exposes one method per report section so the
-notebook remains a readable orchestration layer. The generator preserves the
-original section order and in-memory statistical objects without duplicating
-analysis logic in notebook cells.
+The notebook-facing API keeps presentation cells short.  Every observed value is
+loaded from the XLSX workbook; equations and inferential choices live in code and
+notebook markdown.  Generated tables are ordinary pandas DataFrames and can be
+exported as CSV after review.
 """
 
-from collections.abc import Iterator
-from pathlib import Path
-from typing import Literal
+from __future__ import annotations
 
-LONGITUDINAL_STEPS = (
+# Scientific libraries still expose incomplete typing information.
+# pyright: reportMissingTypeStubs=false
+# pyright: reportUnknownArgumentType=false, reportUnknownMemberType=false
+# pyright: reportUnknownVariableType=false
+import json
+import math
+import platform
+import zlib
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from datetime import timedelta
+from pathlib import Path
+from typing import Any, Final, Literal, cast
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import patsy
+import scipy
+import statsmodels
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from IPython.display import display
+from scipy import stats
+from statsmodels.stats.libqsturng import psturng, qsturng
+
+from festuca_analysis.plotting import (
+    ERRORBAR_CAPSIZE,
+    INTERVAL_LINEWIDTH,
+    MARKER_SIZE,
+    REFERENCE_LINEWIDTH,
+    FigureExporter,
+    apply_plot_theme,
+    plot_horizontal_interval,
+)
+from festuca_analysis.source_data import (
+    DryMatterPolicy,
+    ExperimentData,
+    load_experiment_data,
+    source_provenance_table,
+)
+from festuca_analysis.statistics import (
+    benjamini_hochberg,
+    fit_mixedlm_best,
+    likelihood_ratio,
+    parametric_bootstrap_lrt,
+    rcbd_missing_cell_estimate,
+)
+
+PROJECT_ROOT: Final = Path(__file__).resolve().parents[2]
+DEFAULT_RESULTS_DIR: Final = PROJECT_ROOT / "festuca_thesis_analysis_outputs"
+DEFAULT_FIGURES_DIR: Final = PROJECT_ROOT / "festuca_thesis_figures"
+PRIMARY_NNI_COEFFICIENT: Final = 3.93
+PRIMARY_NNI_EXPONENT: Final = -0.42
+SENSITIVITY_NNI_COEFFICIENT: Final = 4.8
+SENSITIVITY_NNI_EXPONENT: Final = -0.32
+LONGITUDINAL_FIGURE_STEMS: Final = (
+    "figura_01_calendario_experimental_desde_xlsx",
+    "figura_02_agua_desde_xlsx",
+    "trayectorias_observadas_biomass_kg_ha",
+    "trayectorias_observadas_n_pct",
+    "figura_03_rendimiento_observado",
+    "figura_componentes_nulo_reconstruccion",
+    "diagnostico_residuos_rendimiento_secano",
+    "diagnostico_residuos_rendimiento_riego",
+    "modelo_mixto_biomass_kg_ha",
+    "modelo_mixto_n_pct",
+)
+SPANISH_MONTH_ABBREVIATIONS: Final = {
+    1: "ene",
+    2: "feb",
+    3: "mar",
+    4: "abr",
+    5: "may",
+    6: "jun",
+    7: "jul",
+    8: "ago",
+    9: "sep",
+    10: "oct",
+    11: "nov",
+    12: "dic",
+}
+
+
+def _stable_seed(*parts: object, base: int) -> int:
+    payload = "|".join(str(part) for part in parts).encode("utf-8")
+    return base + zlib.crc32(payload) % 1_000_000
+
+
+def _as_float(value: object) -> float:
+    return float(cast(Any, value))
+
+
+def _as_timestamp(value: object) -> pd.Timestamp:
+    return pd.Timestamp(cast(Any, value))
+
+
+def _student_t_critical(count: object) -> float:
+    count_value = int(cast(Any, count))
+    return float(stats.t.ppf(0.975, count_value - 1)) if count_value > 1 else np.nan
+
+
+def _short_spanish_date(value: pd.Timestamp) -> str:
+    return f"{value.day:02d} {SPANISH_MONTH_ABBREVIATIONS[value.month]}"
+
+
+def _experimental_n_step_table(
+    schedule: pd.DataFrame,
+    treatments: Sequence[str],
+    *,
+    view_start: pd.Timestamp,
+    view_end: pd.Timestamp,
+) -> pd.DataFrame:
+    """Build the XLSX-backed experimental-N step geometry used by the schedule."""
+    rows: list[dict[str, object]] = []
+    for treatment in treatments:
+        treatment_schedule = schedule.loc[
+            schedule["treatment"].astype(str).eq(treatment)
+        ]
+        if treatment_schedule.empty:
+            raise ValueError(f"Falta el calendario experimental de {treatment}.")
+        record = treatment_schedule.iloc[0]
+        applications = sorted(
+            pd.Timestamp(value)
+            for value in (
+                record["first_application"],
+                record["second_application"],
+            )
+            if pd.notna(value)
+        )
+        dates = [view_start, *applications, view_end]
+        cumulative = [
+            0.0,
+            *[100.0 * index for index in range(1, len(applications) + 1)],
+            100.0 * len(applications),
+        ]
+        for date, value in zip(dates, cumulative, strict=True):
+            rows.append(
+                {
+                    "treatment": treatment,
+                    "date": date,
+                    "cumulative_experimental_n_kg_ha": value,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+LONGITUDINAL_STEPS: Final = (
     "configuration",
     "load_data",
+    "source_provenance",
+    "source_audit",
+    "variable_lineage",
     "flagged_dry_matter",
     "baseline_summary",
     "schedule",
     "water_inputs",
-    "rcbd_functions",
     "longitudinal_anova",
     "observed_trajectories",
     "final_outcomes",
@@ -43,739 +189,187 @@ LONGITUDINAL_STEPS = (
     "export_artifacts",
 )
 
-# Start and end coincide when the application date is known. A non-zero interval
-# records the documented month without inventing an exact day.
-COMMON_N_APPLICATIONS = (
-    ("2025-04-01", "2025-05-01", 60.0),
-    ("2025-07-01", "2025-07-01", 52.0),
-    ("2025-08-01", "2025-09-01", 52.0),
-)
-COMMON_N_TOTAL_KG_HA = sum(dose for _start, _end, dose in COMMON_N_APPLICATIONS)
-EXPERIMENTAL_N_TOTAL_KG_HA = 200.0
+
+@dataclass(frozen=True)
+class RCBDResult:
+    """One randomized-complete-block analysis."""
+
+    fit: Any
+    anova: pd.DataFrame
+    marginal_means: pd.DataFrame
+    pairwise: pd.DataFrame
+    global_p: float
+    question: str
+    sector: str
+    outcome: str
+    date: pd.Timestamp | None
+
+
+@dataclass(frozen=True)
+class MixedModelResult:
+    """Nested mixed-model fits and one interaction test."""
+
+    sector: str
+    outcome: str
+    scale: str
+    frame: pd.DataFrame
+    additive_fit: Any
+    interaction_fit: Any
+    summary: dict[str, object]
 
 
 class LongitudinalNotebook:
-    """Stateful, section-by-section API for the longitudinal report."""
+    """Stateful report object used by ``festuca_estudio_longitudinal.ipynb``."""
 
     def __init__(
         self,
         *,
         project_root: Path | None = None,
-        dry_matter_policy: Literal["recorded", "ratio", "exclude"] = "recorded",
+        workbook_path: Path | str | None = None,
+        dry_matter_policy: DryMatterPolicy = "recorded",
+        bootstrap_replicates: int = 199,
+        random_seed: int = 20260807,
+        alpha: float = 0.05,
         export_results: bool = True,
         export_figures: bool = True,
-        figure_profile: Literal["standalone", "thesis"] = "standalone",
+        figure_profile: Literal["standalone", "thesis"] = "thesis",
         print_figure_json: bool = False,
     ) -> None:
-        root = (project_root or Path.cwd()).resolve()
-        self._steps = _analysis_steps(
-            project_root=root,
-            dry_matter_policy=dry_matter_policy,
-            export_results=export_results,
-            export_figures=export_figures,
-            figure_profile=figure_profile,
-            print_figure_json=print_figure_json,
+        self.project_root = (project_root or PROJECT_ROOT).resolve()
+        self.workbook_path = workbook_path
+        self.dry_matter_policy = dry_matter_policy
+        self.bootstrap_replicates = bootstrap_replicates
+        self.random_seed = random_seed
+        self.alpha = alpha
+        self.export_results = export_results
+        self.export_figures = export_figures
+        self.results_dir = self.project_root / DEFAULT_RESULTS_DIR.name
+        self.figures_dir = self.project_root / DEFAULT_FIGURES_DIR.name
+        self.figure_profile = figure_profile
+        self.print_figure_json = print_figure_json
+        self.data: ExperimentData | None = None
+        self.tables: dict[str, pd.DataFrame] = {}
+        self.figure_metadata: list[dict[str, object]] = []
+        self.rcbd_results: dict[str, RCBDResult] = {}
+        self.mixed_results: dict[str, MixedModelResult] = {}
+        self.palette = apply_plot_theme()
+        self.figure_exporter = FigureExporter(
+            self.figures_dir,
+            profile=figure_profile,
+            dpi=300,
+            print_json=print_figure_json,
         )
-        self._completed: list[str] = []
+        pd.set_option("display.max_columns", 100)
+        pd.set_option("display.width", 180)
 
-    @property
-    def completed_steps(self) -> tuple[str, ...]:
-        return tuple(self._completed)
+    # ------------------------------------------------------------------
+    # Presentation and state helpers
+    # ------------------------------------------------------------------
 
-    def _advance(self, expected: str) -> None:
-        try:
-            actual = next(self._steps)
-        except StopIteration as error:
-            raise RuntimeError("El análisis longitudinal ya terminó.") from error
-        if actual != expected:
-            raise RuntimeError(
-                f"Orden de ejecución inválido: se esperaba {expected!r} y se obtuvo {actual!r}."
-            )
-        self._completed.append(actual)
+    def _require_data(self) -> ExperimentData:
+        if self.data is None:
+            raise RuntimeError("Ejecute analysis.load_data() antes de esta sección.")
+        return self.data
 
-    def configuration(self) -> None:
-        """Execute the configuration report section."""
-        self._advance("configuration")
-
-    def load_data(self) -> None:
-        """Execute the load data report section."""
-        self._advance("load_data")
-
-    def flagged_dry_matter(self) -> None:
-        """Execute the flagged dry matter report section."""
-        self._advance("flagged_dry_matter")
-
-    def baseline_summary(self) -> None:
-        """Execute the baseline summary report section."""
-        self._advance("baseline_summary")
-
-    def schedule(self) -> None:
-        """Execute the schedule report section."""
-        self._advance("schedule")
-
-    def water_inputs(self) -> None:
-        """Execute the water inputs report section."""
-        self._advance("water_inputs")
-
-    def rcbd_functions(self) -> None:
-        """Execute the rcbd functions report section."""
-        self._advance("rcbd_functions")
-
-    def longitudinal_anova(self) -> None:
-        """Execute the longitudinal anova report section."""
-        self._advance("longitudinal_anova")
-
-    def observed_trajectories(self) -> None:
-        """Execute the observed trajectories report section."""
-        self._advance("observed_trajectories")
-
-    def final_outcomes(self) -> None:
-        """Execute the final outcomes report section."""
-        self._advance("final_outcomes")
-
-    def dry_matter_sensitivity(self) -> None:
-        """Execute the registered/ratio/exclusion dry-matter sensitivity."""
-        self._advance("dry_matter_sensitivity")
-
-    def yield_analysis(self) -> None:
-        """Execute the yield analysis report section."""
-        self._advance("yield_analysis")
-
-    def yield_overview(self) -> None:
-        """Execute the yield overview report section."""
-        self._advance("yield_overview")
-
-    def yield_contrasts(self) -> None:
-        """Execute the yield contrasts report section."""
-        self._advance("yield_contrasts")
-
-    def yield_components(self) -> None:
-        """Execute the yield components report section."""
-        self._advance("yield_components")
-
-    def component_correlations(self) -> None:
-        """Execute the component correlations report section."""
-        self._advance("component_correlations")
-
-    def seed_weight_precision(self) -> None:
-        """Execute the seed weight precision report section."""
-        self._advance("seed_weight_precision")
-
-    def model_diagnostics(self) -> None:
-        """Execute the model diagnostics report section."""
-        self._advance("model_diagnostics")
-
-    def primary_residual_diagnostics(self) -> None:
-        """Execute the primary residual diagnostics report section."""
-        self._advance("primary_residual_diagnostics")
-
-    def missing_n_sensitivity(self) -> None:
-        """Execute the missing n sensitivity report section."""
-        self._advance("missing_n_sensitivity")
-
-    def joint_sector_analysis(self) -> None:
-        """Execute the joint sector analysis report section."""
-        self._advance("joint_sector_analysis")
-
-    def correlation_audit(self) -> None:
-        """Execute the correlation audit report section."""
-        self._advance("correlation_audit")
-
-    def mixed_models(self) -> None:
-        """Execute the mixed models report section."""
-        self._advance("mixed_models")
-
-    def mixed_estimates(self) -> None:
-        """Execute the mixed estimates report section."""
-        self._advance("mixed_estimates")
-
-    def september_sensitivity(self) -> None:
-        """Execute the september sensitivity report section."""
-        self._advance("september_sensitivity")
-
-    def figure_manifest(self) -> None:
-        """Execute the figure manifest report section."""
-        self._advance("figure_manifest")
-
-    def automatic_summary(self) -> None:
-        """Execute the automatic summary report section."""
-        self._advance("automatic_summary")
-
-    def export_artifacts(self) -> None:
-        """Execute the export artifacts report section."""
-        self._advance("export_artifacts")
-
-
-def run_all_longitudinal() -> None:
-    """Execute every longitudinal report section headlessly from the CLI."""
-    import matplotlib
-
-    matplotlib.use("Agg", force=True)
-    analysis = LongitudinalNotebook()
-    for step in LONGITUDINAL_STEPS:
-        getattr(analysis, step)()
-
-
-def _analysis_steps(
-    *,
-    project_root: Path,
-    dry_matter_policy: Literal["recorded", "ratio", "exclude"],
-    export_results: bool,
-    export_figures: bool,
-    figure_profile: Literal["standalone", "thesis"],
-    print_figure_json: bool,
-) -> Iterator[str]:
-
-    # Notebook step: configuration
-    import math
-    import platform
-    from collections.abc import Sequence
-    from dataclasses import dataclass
-    from importlib import import_module
-    from itertools import combinations, pairwise
-    from pathlib import Path
-    from typing import Any, cast
-
-    import matplotlib.pyplot as plt
-    import numpy as np
-    import pandas as pd
-    import patsy  # pyright: ignore[reportMissingTypeStubs]
-    import scipy
-    import seaborn as sns  # pyright: ignore[reportMissingTypeStubs]
-    import statsmodels  # pyright: ignore[reportMissingTypeStubs]
-    import statsmodels.api as sm  # pyright: ignore[reportMissingTypeStubs]
-    import statsmodels.formula.api as smf  # pyright: ignore[reportMissingTypeStubs]
-    from IPython.display import (
-        Markdown,
-        display,  # pyright: ignore[reportUnknownVariableType]
-    )
-    from matplotlib.colors import to_rgb
-    from scipy import stats
-
-    from festuca_analysis.plotting import (
-        CATEGORICAL_ERRORBAR_CAPSIZE,
-        DATA_LINEWIDTH,
-        ERRORBAR_CAPSIZE,
-        INTERVAL_LINEWIDTH,
-        MARKER_SIZE,
-        REFERENCE_LINEWIDTH,
-        FigureExporter,
-        apply_plot_theme,
-        plot_horizontal_interval,
-    )
-    from festuca_analysis.statistics import (
-        benjamini_hochberg,
-        fit_mixedlm_best,
-        likelihood_ratio,
-        parametric_bootstrap_lrt,
-        rcbd_missing_cell_estimate,
-    )
-
-    libqsturng = import_module("statsmodels.stats.libqsturng")
-    libqsturng_api = cast(Any, libqsturng)
-    mpl = cast(Any, plt)
-    patsy_api = cast(Any, patsy)
-    sns_api = cast(Any, sns)
-    sm_api = cast(Any, sm)
-    smf_api = cast(Any, smf)
-    statsmodels_api = cast(Any, statsmodels)
-    display_output = cast(Any, display)
-    psturng_fn = libqsturng_api.psturng
-    qsturng_fn = libqsturng_api.qsturng
-
-    def format_display_float(value: float) -> str:
-        return f"{value:,.4f}"
-
-    pd.set_option("display.max_columns", 80)
-    pd.set_option("display.width", 180)
-    pd.set_option("display.float_format", format_display_float)
-
-    ALPHA = 0.05
-    BOOTSTRAP_REPLICATES = 199
-    RANDOM_SEED = 20260807
-    DRY_MATTER_POLICY = dry_matter_policy
-    EXPORT_RESULTS = export_results
-    PROJECT_ROOT = project_root
-    RESULTS_DIR = PROJECT_ROOT / "festuca_thesis_analysis_outputs"
-    EXPORT_FIGURES = export_figures
-    FIGURES_DIR = PROJECT_ROOT / "festuca_thesis_figures"
-    FIGURE_DPI = 300
-
-    PLOT_PALETTE = apply_plot_theme()
-    figure_exporter = FigureExporter(
-        FIGURES_DIR,
-        profile=figure_profile,
-        dpi=FIGURE_DPI,
-        print_json=print_figure_json,
-    )
-    add_figure_header = figure_exporter.add_header
-    add_figure_note = figure_exporter.add_note
-
-    def save_figure(fig: Any, filename_stem: str) -> None:
-        if not EXPORT_FIGURES:
-            figure_exporter.discard(fig)
-            return
-        figure_exporter.save(fig, filename_stem)
-
-    TREATMENTS = ["M0", "M1", "M2", "M3", "M4", "M5"]
-    FERTILIZED = ["M1", "M2", "M3", "M4", "M5"]
-    SECTORS = ["Secano", "Riego"]
-    BLOCKS = ["R1", "R2", "R3", "R4"]
-    DATES = pd.to_datetime(["2025-09-16", "2025-10-20", "2025-11-12"])
-    DATE_LABELS = {
-        pd.Timestamp("2025-09-16"): "16 sep",
-        pd.Timestamp("2025-10-20"): "20 oct",
-        pd.Timestamp("2025-11-12"): "12 nov",
-    }
-
-    TREATMENT_COLORS = dict(zip(TREATMENTS, PLOT_PALETTE[:6], strict=True))
-    TREATMENT_MARKERS = dict.fromkeys(TREATMENTS, "o")
-    SECTOR_COLORS = dict(zip(SECTORS, (PLOT_PALETTE[1], PLOT_PALETTE[6]), strict=True))
-    # Only the component-correlation plot overlays both sectors on one axis.
-    SECTOR_MARKERS = {"Secano": "o", "Riego": "s"}
-
-    OUTCOME_LABELS = {
-        "biomass_kg_ha_used": "Biomasa aérea (kg MS ha⁻¹)",
-        "n_pct": "N en biomasa (%)",
-        "q_kg_n_ha": "N presente en biomasa aérea (kg N ha⁻¹)",
-        "nni_revised": "INN revisado",
-        "nni_historical": "INN histórico",
-        "panicle_density_m2": "Panojas m⁻²",
-        "estimated_seeds_per_panicle": "Semillas estimadas por panoja",
-        "w1000_g": "Peso de mil semillas (g)",
-        "dirty_yield_kg_ha": "Rendimiento sin limpiar (kg ha⁻¹)",
-        "clean_yield_kg_ha": "Rendimiento limpio (kg ha⁻¹)",
-        "harvest_index_pct": "Índice de cosecha (%)",
-        "cleaning_loss_pct": "Merma de limpieza (%)",
-        "agronomic_efficiency": "Eficiencia agronómica (kg semilla kg⁻¹ N)",
-        "apparent_water_productivity": "Productividad aparente del agua (kg ha⁻¹ mm⁻¹)",
-    }
-    OBSERVED_BY_DATE_TITLES = {
-        "biomass_kg_ha_used": (
-            "Biomasa aérea observada en las tres fechas de muestreo"
-        ),
-        "n_pct": "Concentración de N observada en las tres fechas de muestreo",
-        "q_kg_n_ha": ("N presente en biomasa aérea en las tres fechas de muestreo"),
-        "nni_revised": "INN revisado en las tres fechas de muestreo",
-    }
-
-    print("Python", platform.python_version())
-    print("pandas", pd.__version__)
-    print("numpy", np.__version__)
-    print("scipy", scipy.__version__)
-    print("statsmodels", statsmodels_api.__version__)
-    yield "configuration"
-
-    # Notebook step: load_data
-    HARVEST_AREA_M2 = 0.76
-    BIOMASS_AREA_M2 = 0.38
-    DM_ISSUE_SAMPLE_IDS = {150, 152}
-
-    CANONICAL_SCHEDULE = {
-        "M0": (),
-        "M1": ("2025-06-12", "2025-07-31"),
-        "M2": ("2025-06-26", "2025-07-31"),
-        "M3": ("2025-07-10", "2025-08-21"),
-        "M4": ("2025-07-31", "2025-09-04"),
-        "M5": ("2025-08-21", "2025-09-20"),
-    }
-
-    def locate_workbook(filename: str = "Datos_Ema_Serrana_INN.xlsx") -> Path:
-        candidates = [
-            PROJECT_ROOT / "sources" / filename,
-            PROJECT_ROOT / filename,
-            Path("/mnt/data") / filename,
-        ]
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate.resolve()
-        raise FileNotFoundError(
-            f"No se encontró {filename!r}. Se probó: "
-            + ", ".join(str(path) for path in candidates)
-        )
-
-    def normalize_design_columns(frame: pd.DataFrame) -> pd.DataFrame:
-        result = frame.copy()
-        result["Condición"] = result["Condición"].astype(str).str.strip()
-        result["Tratamiento"] = (
-            result["Tratamiento"]
-            .astype(str)
-            .str.strip()
-            .str.upper()
-            .replace({"MO": "M0"})
-        )
-        result["Repetición"] = result["Repetición"].astype(str).str.strip().str.upper()
-        return result
-
-    def categorical(series: pd.Series, levels: Sequence[str]) -> pd.Categorical:
-        return pd.Categorical(series.astype(str), categories=list(levels), ordered=True)
-
-    def coerce_numeric_columns(
-        frame: pd.DataFrame,
-        columns: Sequence[str],
+    def _show(
+        self, name: str, frame: pd.DataFrame, *, copy: bool = True
     ) -> pd.DataFrame:
-        result = frame.copy()
-        for column in columns:
-            if column in result:
-                result[column] = pd.to_numeric(result[column], errors="coerce")
-        return result
+        table = frame.copy() if copy else frame
+        self.tables[name] = table
+        display(table)
+        return table
 
-    @dataclass(frozen=True)
-    class ExperimentData:
-        workbook_path: Path
-        longitudinal: pd.DataFrame
-        harvest: pd.DataFrame
-        seed_weight_long: pd.DataFrame
-        baseline_biomass: pd.DataFrame
-        baseline_tillers: pd.DataFrame
-        schedule: pd.DataFrame
-        qa: pd.DataFrame
-
-    def load_experiment_data(
-        workbook_path: Path,
+    def _save_figure(
+        self,
+        fig: Any,
+        stem: str,
         *,
-        dry_matter_policy: str = "recorded",
-    ) -> ExperimentData:
-        if dry_matter_policy not in {"recorded", "ratio", "exclude"}:
-            raise ValueError("dry_matter_policy debe ser recorded, ratio o exclude")
+        title: str,
+        subtitle: str | None = None,
+        note: str | None = None,
+    ) -> None:
+        self.figure_exporter.add_header(fig, title, subtitle=subtitle)
+        if note:
+            self.figure_exporter.add_note(fig, note)
+        if self.export_figures:
+            payload = self.figure_exporter.save(fig, stem)
+            self.figure_metadata.append(payload)
+        else:
+            self.figure_exporter.discard(fig)
+        plt.show()
+        plt.close(fig)
 
-        raw_ms = pd.read_excel(  # pyright: ignore[reportUnknownMemberType]
-            workbook_path, sheet_name="Datos_MS", header=4
-        )
-        raw_quality = pd.read_excel(  # pyright: ignore[reportUnknownMemberType]
-            workbook_path, sheet_name="Calidad", header=0
-        )
-        raw_harvest = pd.read_excel(  # pyright: ignore[reportUnknownMemberType]
-            workbook_path, sheet_name="Datos_Rto", header=4
-        )
+    @staticmethod
+    def _display_date(value: pd.Timestamp | None) -> str:
+        return "final" if value is None else pd.Timestamp(value).date().isoformat()
 
-        ms = normalize_design_columns(raw_ms)
-        ms["Muestra"] = pd.to_numeric(ms["Muestra"], errors="coerce").astype("Int64")
-        ms["Fecha"] = pd.to_datetime(ms["Fecha"], errors="coerce")
-        ms = coerce_numeric_columns(
-            ms,
-            [
-                "Peso verde (1m)",
-                "Peso verde (muestra)",
-                "Peso Seco",
-                "%MS",
-                "KgMS/ha",
-                "Macollos/30 cm",
-                "Macollos/m2",
-            ],
-        )
-
-        # Las filas sin M0–M5 son la caracterización general del 12 de junio.
-        baseline_ms = ms.loc[~ms["Tratamiento"].isin(TREATMENTS)].copy()
-        experimental_ms = ms.loc[ms["Tratamiento"].isin(TREATMENTS)].copy()
-
-        experimental_ms["dm_ratio_pct"] = (
-            100.0
-            * experimental_ms["Peso Seco"]
-            / experimental_ms["Peso verde (muestra)"]
-        )
-        experimental_ms["dm_issue"] = experimental_ms["Muestra"].isin(
-            DM_ISSUE_SAMPLE_IDS
-        )
-        experimental_ms["dm_pct_used"] = experimental_ms["%MS"]
-        experimental_ms["biomass_kg_ha_used"] = experimental_ms["KgMS/ha"]
-
-        if dry_matter_policy == "ratio":
-            mask = experimental_ms["dm_issue"]
-            experimental_ms.loc[mask, "dm_pct_used"] = experimental_ms.loc[
-                mask, "dm_ratio_pct"
-            ]
-            experimental_ms.loc[mask, "biomass_kg_ha_used"] = (
-                experimental_ms.loc[mask, "Peso verde (1m)"]
-                * experimental_ms.loc[mask, "dm_pct_used"]
-                / 100.0
-                * 10.0
-                / BIOMASS_AREA_M2
-            )
-        elif dry_matter_policy == "exclude":
-            mask = experimental_ms["dm_issue"]
-            experimental_ms.loc[mask, ["dm_pct_used", "biomass_kg_ha_used"]] = np.nan
-
-        quality = normalize_design_columns(raw_quality)
-        quality["Muestra"] = pd.to_numeric(quality["Muestra"], errors="coerce").astype(
-            "Int64"
-        )
-        quality["Fecha"] = pd.to_datetime(quality["Fecha"], errors="coerce")
-        quality = coerce_numeric_columns(quality, ["% N", "% FDA ", "% FDN "])
-        experimental_quality = quality.loc[
-            quality["Tratamiento"].isin(TREATMENTS)
-        ].copy()
-
-        key = ["Fecha", "Muestra", "Condición", "Tratamiento", "Repetición"]
-        longitudinal = experimental_ms[
-            key
-            + [
-                "%MS",
-                "dm_ratio_pct",
-                "dm_pct_used",
-                "KgMS/ha",
-                "biomass_kg_ha_used",
-                "dm_issue",
-            ]
-        ].merge(
-            experimental_quality[
-                key + ["% N", "% FDA ", "% FDN ", "REG. DE LAB.", "Origen del dato"]
-            ],
-            on=key,
-            how="left",
-            validate="one_to_one",
-        )
-
-        longitudinal = longitudinal.rename(
-            columns={
-                "Fecha": "date",
-                "Muestra": "sample_id",
-                "Condición": "sector",
-                "Tratamiento": "treatment",
-                "Repetición": "block",
-                "%MS": "dm_pct_recorded",
-                "KgMS/ha": "biomass_kg_ha_recorded",
-                "% N": "n_pct",
-                "% FDA ": "adf_pct",
-                "% FDN ": "ndf_pct",
-                "REG. DE LAB.": "lab_id",
-                "Origen del dato": "data_origin",
-            }
-        )
-        longitudinal["q_kg_n_ha"] = (
-            longitudinal["biomass_kg_ha_used"] * longitudinal["n_pct"] / 100.0
-        )
-        biomass_t_ha = longitudinal["biomass_kg_ha_used"] / 1000.0
-        longitudinal["nni_revised"] = longitudinal["n_pct"] / (
-            3.93 * biomass_t_ha.pow(-0.42)
-        )
-        longitudinal["nni_historical"] = longitudinal["n_pct"] / (
-            4.8 * biomass_t_ha.pow(-0.32)
-        )
-        longitudinal["plot_id"] = (
-            longitudinal["sector"]
-            + "_"
-            + longitudinal["block"]
-            + "_"
-            + longitudinal["treatment"]
-        )
-        longitudinal["date_label"] = longitudinal["date"].map(DATE_LABELS)
-
-        # Cosecha final: se renombran las columnas por posición porque las tres
-        # submuestras de 100 semillas tienen encabezados duplicados/inconsistentes.
-        harvest = normalize_design_columns(raw_harvest)
-        harvest = harvest.loc[harvest["Tratamiento"].isin(TREATMENTS)].copy()
-        harvest["Muestra"] = pd.to_numeric(harvest["Muestra"], errors="coerce").astype(
-            "Int64"
-        )
-        harvest["Fecha"] = pd.to_datetime(harvest["Fecha"], errors="coerce")
-        cols = list(harvest.columns)
-        rename_by_position = {
-            cols[0]: "date",
-            cols[1]: "sample_id",
-            cols[2]: "sector",
-            cols[3]: "treatment",
-            cols[4]: "block",
-            cols[5]: "panicle_count",
-            cols[6]: "dirty_mass_g",
-            cols[7]: "clean_mass_g",
-            cols[8]: "w100_1_g",
-            cols[9]: "w100_2_g",
-            cols[10]: "w100_3_g",
-            cols[11]: "w1000_workbook_g",
-        }
-        harvest = harvest.rename(columns=rename_by_position)[
-            list(rename_by_position.values())
-        ].copy()
-        harvest = coerce_numeric_columns(
-            harvest,
-            [
-                "panicle_count",
-                "dirty_mass_g",
-                "clean_mass_g",
-                "w100_1_g",
-                "w100_2_g",
-                "w100_3_g",
-                "w1000_workbook_g",
-            ],
-        )
-
-        harvest["w1000_g"] = (
-            harvest[["w100_1_g", "w100_2_g", "w100_3_g"]].mean(axis=1) * 10.0
-        )
-        harvest["panicle_density_m2"] = harvest["panicle_count"] / HARVEST_AREA_M2
-        harvest["dirty_yield_kg_ha"] = harvest["dirty_mass_g"] * 10.0 / HARVEST_AREA_M2
-        harvest["clean_yield_kg_ha"] = harvest["clean_mass_g"] * 10.0 / HARVEST_AREA_M2
-        harvest["clean_recovery"] = harvest["clean_mass_g"] / harvest["dirty_mass_g"]
-        harvest["cleaning_loss_pct"] = 100.0 * (1.0 - harvest["clean_recovery"])
-        harvest["estimated_seeds_per_panicle"] = (
-            1000.0
-            * harvest["clean_mass_g"]
-            / (harvest["w1000_g"] * harvest["panicle_count"])
-        )
-        harvest["plot_id"] = (
-            harvest["sector"] + "_" + harvest["block"] + "_" + harvest["treatment"]
-        )
-
-        final_biomass = longitudinal.loc[
-            longitudinal["date"].eq(DATES[-1]),
-            ["plot_id", "biomass_kg_ha_used", "dm_issue"],
+    @staticmethod
+    def _date_level(frame: pd.DataFrame, value: object) -> str:
+        date = _as_timestamp(value)
+        labels = frame.loc[
+            pd.to_datetime(frame["date"].astype(str)).eq(date), "date_label"
         ]
-        harvest = harvest.merge(
-            final_biomass,
-            on="plot_id",
-            how="left",
-            validate="one_to_one",
-        )
-        harvest["harvest_index_pct"] = (
-            100.0 * harvest["clean_yield_kg_ha"] / harvest["biomass_kg_ha_used"]
-        )
-        water_mm = harvest["sector"].map({"Secano": 510.0, "Riego": 675.0})
-        harvest["apparent_water_productivity"] = harvest["clean_yield_kg_ha"] / water_mm
+        if labels.empty:
+            return date.date().isoformat()
+        return str(labels.iloc[0])
 
-        m0_reference = harvest.loc[
-            harvest["treatment"].eq("M0"),
-            ["sector", "block", "clean_yield_kg_ha"],
-        ].rename(columns={"clean_yield_kg_ha": "m0_yield_same_block"})
-        harvest = harvest.merge(
-            m0_reference,
-            on=["sector", "block"],
-            how="left",
-            validate="many_to_one",
-        )
-        harvest["agronomic_efficiency"] = np.where(
-            harvest["treatment"].eq("M0"),
-            np.nan,
-            (harvest["clean_yield_kg_ha"] - harvest["m0_yield_same_block"]) / 200.0,
-        )
+    # ------------------------------------------------------------------
+    # Source and reconstruction
+    # ------------------------------------------------------------------
 
-        for frame in [longitudinal, harvest]:
-            frame["sector"] = categorical(frame["sector"], SECTORS)
-            frame["block"] = categorical(frame["block"], BLOCKS)
-            frame["treatment"] = categorical(frame["treatment"], TREATMENTS)
-        longitudinal["date"] = pd.Categorical(
-            longitudinal["date"], categories=DATES, ordered=True
-        )
-
-        seed_weight_long = harvest.melt(
-            id_vars=["plot_id", "sector", "block", "treatment", "sample_id"],
-            value_vars=["w100_1_g", "w100_2_g", "w100_3_g"],
-            var_name="technical_replicate",
-            value_name="w100_g",
-        )
-
-        baseline_biomass = baseline_ms.loc[
-            baseline_ms["KgMS/ha"].notna(),
-            ["Fecha", "Muestra", "Condición", "Repetición", "KgMS/ha"],
-        ].rename(
-            columns={
-                "Fecha": "date",
-                "Muestra": "sample_id",
-                "Condición": "sector",
-                "Repetición": "block",
-                "KgMS/ha": "biomass_kg_ha",
-            }
-        )
-        baseline_tillers = baseline_ms.loc[
-            baseline_ms["Macollos/m2"].notna(),
-            ["Fecha", "Muestra", "Condición", "Repetición", "Macollos/m2"],
-        ].rename(
-            columns={
-                "Fecha": "date",
-                "Muestra": "sample_id",
-                "Condición": "sector",
-                "Repetición": "replicate_label",
-                "Macollos/m2": "tillers_m2",
-            }
-        )
-
-        schedule_rows: list[dict[str, object]] = []
-        for treatment, date_strings in CANONICAL_SCHEDULE.items():
-            dates = pd.to_datetime(list(date_strings))
-            schedule_rows.append(
-                {
-                    "treatment": treatment,
-                    "first_application": dates.min() if len(dates) else pd.NaT,
-                    "second_application": dates.max() if len(dates) else pd.NaT,
-                    "extra_n_kg_ha": 0 if treatment == "M0" else 200,
-                }
-            )
-        schedule = pd.DataFrame(schedule_rows)
-
-        qa_rows = [
-            ("filas longitudinales", len(longitudinal), 144),
-            ("parcelas longitudinales", longitudinal["plot_id"].nunique(), 48),
-            (
-                "fechas por parcela",
-                int(
-                    longitudinal.groupby("plot_id", observed=True)["date"]
-                    .nunique()
-                    .min()
+    def configuration(self) -> pd.DataFrame:
+        frame = pd.DataFrame(
+            [
+                ("Python", platform.python_version()),
+                ("pandas", pd.__version__),
+                ("numpy", np.__version__),
+                ("scipy", scipy.__version__),
+                ("statsmodels", statsmodels.__version__),
+                ("dry_matter_policy", self.dry_matter_policy),
+                ("bootstrap_replicates", self.bootstrap_replicates),
+                ("random_seed", self.random_seed),
+                ("alpha", self.alpha),
+                (
+                    "NNI primary curve",
+                    f"{PRIMARY_NNI_COEFFICIENT} * W^{PRIMARY_NNI_EXPONENT}",
                 ),
-                3,
-            ),
-            ("filas de cosecha", len(harvest), 48),
-            ("parcelas de cosecha", harvest["plot_id"].nunique(), 48),
-            (
-                "duplicados parcela-fecha",
-                int(
-                    longitudinal.duplicated(
-                        ["date", "sector", "block", "treatment"]
-                    ).sum()
+                (
+                    "NNI sensitivity curve",
+                    f"{SENSITIVITY_NNI_COEFFICIENT} * W^{SENSITIVITY_NNI_EXPONENT}",
                 ),
-                0,
-            ),
-            (
-                "duplicados de cosecha",
-                int(harvest.duplicated(["sector", "block", "treatment"]).sum()),
-                0,
-            ),
-            ("resultados N faltantes", int(longitudinal["n_pct"].isna().sum()), 1),
-            ("registros %MS señalados", int(longitudinal["dm_issue"].sum()), 2),
-            (
-                "máxima diferencia PMS recalculado-libro",
-                float((harvest["w1000_g"] - harvest["w1000_workbook_g"]).abs().max()),
-                0.0,
-            ),
-        ]
-        qa = pd.DataFrame(qa_rows, columns=["check", "observed", "expected"])
-        qa["passes"] = np.isclose(
-            pd.to_numeric(qa["observed"]),
-            pd.to_numeric(qa["expected"]),
-            equal_nan=True,
+            ],
+            columns=["setting", "value"],
         )
-        if not qa["passes"].all():
-            raise AssertionError(qa.loc[~qa["passes"]].to_string(index=False))
+        return self._show("configuration", frame)
 
-        return ExperimentData(
-            workbook_path=workbook_path,
-            longitudinal=longitudinal.sort_values(
-                ["sector", "block", "treatment", "date"]
-            ).reset_index(drop=True),
-            harvest=harvest.sort_values(["sector", "block", "treatment"]).reset_index(
-                drop=True
-            ),
-            seed_weight_long=seed_weight_long.reset_index(drop=True),
-            baseline_biomass=baseline_biomass.reset_index(drop=True),
-            baseline_tillers=baseline_tillers.reset_index(drop=True),
-            schedule=schedule,
-            qa=qa,
+    def load_data(self) -> pd.DataFrame:
+        self.data = load_experiment_data(
+            self.workbook_path,
+            project_root=self.project_root,
+            dry_matter_policy=cast(DryMatterPolicy, self.dry_matter_policy),
+            include_estimated_quality=False,
+            nni_primary_coefficient=PRIMARY_NNI_COEFFICIENT,
+            nni_primary_exponent=PRIMARY_NNI_EXPONENT,
+            nni_sensitivity_coefficient=SENSITIVITY_NNI_COEFFICIENT,
+            nni_sensitivity_exponent=SENSITIVITY_NNI_EXPONENT,
+        )
+        return self._show("qa", self.data.qa)
+
+    def source_provenance(self) -> pd.DataFrame:
+        return self._show(
+            "source_provenance",
+            source_provenance_table(self._require_data()),
         )
 
-    WORKBOOK_PATH = locate_workbook()
-    data = load_experiment_data(
-        WORKBOOK_PATH,
-        dry_matter_policy=DRY_MATTER_POLICY,
-    )
-    print("Libro:", data.workbook_path)
-    print("Política de materia seca:", DRY_MATTER_POLICY)
-    display_output(data.qa)
-    yield "load_data"
+    def source_audit(self) -> pd.DataFrame:
+        return self._show("source_audit", self._require_data().spec.source_audit)
 
-    # Notebook step: flagged_dry_matter
-    flagged_dm = data.longitudinal.loc[
-        data.longitudinal["dm_issue"],
-        [
+    def variable_lineage(self) -> pd.DataFrame:
+        return self._show("variable_lineage", self._require_data().variable_lineage)
+
+    def flagged_dry_matter(self) -> pd.DataFrame:
+        data = self._require_data()
+        columns = [
             "sample_id",
             "sector",
             "block",
@@ -783,1401 +377,1141 @@ def _analysis_steps(
             "date",
             "dm_pct_recorded",
             "dm_ratio_pct",
-            "biomass_kg_ha_recorded",
-            "biomass_kg_ha_used",
-        ],
-    ].copy()
-    display_output(flagged_dm)
-    yield "flagged_dry_matter"
-
-    # Notebook step: baseline_summary
-    baseline_summary = pd.DataFrame(
-        {
-            "biomass_t_ha": (
-                data.baseline_biomass.groupby("sector", observed=True)[
-                    "biomass_kg_ha"
-                ].mean()
-                / 1000.0
-            ),
-            "tillers_m2": data.baseline_tillers.groupby("sector", observed=True)[
-                "tillers_m2"
-            ].mean(),
-            "n_biomass_samples": data.baseline_biomass.groupby(
-                "sector", observed=True
-            ).size(),
-            "n_tiller_samples": data.baseline_tillers.groupby(
-                "sector", observed=True
-            ).size(),
-        }
-    )
-    display_output(baseline_summary.round(2))
-    yield "baseline_summary"
-
-    # Notebook step: schedule
-    display_output(data.schedule)
-
-    def plot_schedule_and_cumulative_n(
-        *,
-        view_start: pd.Timestamp,
-        view_end: pd.Timestamp,
-        filename_stem: str,
-        title: str,
-        subtitle: str,
-        figure_height: float,
-        row_height: float,
-    ) -> None:
-        study_start = pd.Timestamp("2025-04-01")
-        study_end = pd.Timestamp("2025-11-30")
-        if not study_start <= view_start < view_end <= study_end:
-            raise ValueError(
-                "La ventana del cronograma debe quedar dentro del estudio."
-            )
-        common_n_periods = [
-            (pd.Timestamp(start), pd.Timestamp(end), dose)
-            for start, end, dose in COMMON_N_APPLICATIONS
+            "dm_abs_difference_pp",
+            "dm_relative_difference",
+            "biomass_kg_ha_workbook",
+            "biomass_kg_ha",
+            "kgms_workbook_status",
         ]
-        common_n_uncertain_periods = [
-            (start, end, dose, rf"$\approx${dose:.0f} común")
-            for start, end, dose in common_n_periods
-            if start != end
-        ]
-        exact_common_events = {
-            start: dose for start, end, dose in common_n_periods if start == end
-        }
-        if set(exact_common_events) != {pd.Timestamp("2025-07-01")}:
-            raise AssertionError(
-                "Se esperaba una aplicación común fechada el 1.º de julio."
-            )
-        grazing_closure = next(iter(exact_common_events))
-        common_n_total = COMMON_N_TOTAL_KG_HA
-        fertilized_n_total = common_n_total + EXPERIMENTAL_N_TOTAL_KG_HA
-        dose_scale = row_height / fertilized_n_total
-        common_color = "0.58"
-        common_fill_opacity = 0.18
-        uncertain_fill_opacity = 0.28
-        common_linestyle = (0, (2.2, 2.4))
-        uncertainty_color = "0.62"
-        separator_color = "0.82"
-        row_positions = {
-            treatment: float(len(TREATMENTS) - index - 1)
-            for index, treatment in enumerate(TREATMENTS)
-        }
+        flagged = data.longitudinal.loc[data.longitudinal["dm_issue"], columns]
+        return self._show("dry_matter_records_to_verify", flagged)
 
-        def is_uncertain(moment: pd.Timestamp) -> bool:
-            return any(
-                start <= moment < end
-                for start, end, _dose, _label in common_n_uncertain_periods
-            )
-
-        def certain_common_n(moment: pd.Timestamp) -> float:
-            uncertain_n = sum(
-                dose
-                for _start, end, dose, _label in common_n_uncertain_periods
-                if moment >= end
-            )
-            exact_n = sum(
-                dose for date, dose in exact_common_events.items() if moment >= date
-            )
-            return float(uncertain_n + exact_n)
-
-        def experimental_n(
-            moment: pd.Timestamp,
-            application_dates: list[pd.Timestamp],
-        ) -> float:
-            return 100.0 * sum(moment >= date for date in application_dates)
-
-        def fill_color(color: Any, opacity: float) -> tuple[float, float, float]:
-            red, green, blue = to_rgb(color)
-            return (
-                1.0 - opacity * (1.0 - red),
-                1.0 - opacity * (1.0 - green),
-                1.0 - opacity * (1.0 - blue),
-            )
-
-        common_fill_color = fill_color(common_color, common_fill_opacity)
-        uncertain_common_fill_color = fill_color(common_color, uncertain_fill_opacity)
-
-        fig, ax = mpl.subplots(figsize=(13.6, figure_height))
-
-        for boundary in [0.83, 1.83, 2.83, 3.83, 4.83]:
-            ax.axhline(
-                boundary,
-                color=separator_color,
-                linestyle=(0, (1.2, 4.0)),
-                linewidth=REFERENCE_LINEWIDTH,
-                zorder=0,
-            )
-
-        for sample_date in DATES:
-            ax.axvline(
-                sample_date,
-                color=uncertainty_color,
-                linestyle=(0, (2.0, 3.0)),
-                linewidth=REFERENCE_LINEWIDTH,
-                alpha=0.85,
-                zorder=1,
-            )
-
-        ax.axvline(
-            grazing_closure,
-            color="0.48",
-            linewidth=REFERENCE_LINEWIDTH,
-            alpha=0.9,
-            zorder=1,
-        )
-
-        application_labels: dict[int, str] = {6: "jun", 7: "jul", 8: "ago", 9: "sep"}
-        treatment_colors = dict(zip(FERTILIZED, PLOT_PALETTE[1:6], strict=True))
-
-        for treatment in TREATMENTS:
-            baseline = row_positions[treatment]
-            row = data.schedule.loc[data.schedule["treatment"].eq(treatment)].iloc[0]
-            application_dates = (
-                []
-                if treatment == "M0"
-                else [
-                    pd.Timestamp(row["first_application"]),
-                    pd.Timestamp(row["second_application"]),
-                ]
-            )
-            line_color = (
-                common_color if treatment == "M0" else treatment_colors[treatment]
-            )
-
-            exact_event_dates = {*exact_common_events, *application_dates}
-            knots = sorted(
-                {
-                    study_start,
-                    study_end,
-                    *[
-                        start
-                        for start, _end, _dose, _label in common_n_uncertain_periods
-                    ],
-                    *[end for _start, end, _dose, _label in common_n_uncertain_periods],
-                    *exact_event_dates,
+    def baseline_summary(self) -> pd.DataFrame:
+        data = self._require_data()
+        biomass = (
+            data.baseline_biomass.groupby("sector", observed=True)["biomass_kg_ha"]
+            .agg(["count", "mean", "std", "min", "max"])
+            .reset_index()
+            .rename(
+                columns={
+                    "count": "n_biomass",
+                    "mean": "biomass_mean_kg_ha",
+                    "std": "biomass_sd_kg_ha",
+                    "min": "biomass_min_kg_ha",
+                    "max": "biomass_max_kg_ha",
                 }
             )
-            for segment_start, segment_end in pairwise(knots):
-                midpoint = segment_start + (segment_end - segment_start) / 2
-                if is_uncertain(midpoint):
+        )
+        tillers = (
+            data.baseline_tillers.groupby("sector", observed=True)["tillers_m2"]
+            .agg(["count", "mean", "std", "min", "max"])
+            .reset_index()
+            .rename(
+                columns={
+                    "count": "n_tillers",
+                    "mean": "tillers_mean_m2",
+                    "std": "tillers_sd_m2",
+                    "min": "tillers_min_m2",
+                    "max": "tillers_max_m2",
+                }
+            )
+        )
+        return self._show(
+            "baseline_summary",
+            biomass.merge(tillers, on="sector", how="outer", validate="one_to_one"),
+        )
+
+    def schedule(self) -> pd.DataFrame:
+        data = self._require_data()
+        schedule = data.spec.schedule.copy()
+        self._show("experimental_n_schedule", schedule)
+        self._show("recorded_management", data.spec.management)
+
+        treatment_order = list(data.spec.treatments)
+        application_values = schedule[
+            ["first_application", "second_application"]
+        ].stack()
+        sampling_dates = pd.to_datetime(data.longitudinal["date"].astype(str))
+        view_start = min(
+            _as_timestamp(application_values.min()),
+            _as_timestamp(sampling_dates.min()),
+        ) - timedelta(days=14)
+        view_end = max(
+            _as_timestamp(application_values.max()),
+            _as_timestamp(sampling_dates.max()),
+        ) + timedelta(days=14)
+        step_table = _experimental_n_step_table(
+            schedule,
+            treatment_order,
+            view_start=view_start,
+            view_end=view_end,
+        )
+
+        fig, axis = plt.subplots(figsize=(11.5, 6.1))
+        y_positions = np.arange(len(treatment_order))[::-1]
+        colors = dict(
+            zip(treatment_order, self.palette[: len(treatment_order)], strict=True)
+        )
+        for y, treatment in zip(y_positions, treatment_order, strict=True):
+            treatment_steps = step_table.loc[
+                step_table["treatment"].astype(str).eq(treatment)
+            ]
+            cumulative = treatment_steps["cumulative_experimental_n_kg_ha"].to_numpy(
+                float
+            )
+            row_curve = y - 0.27 + 0.54 * cumulative / 200.0
+            cast(Any, axis).step(
+                treatment_steps["date"],
+                row_curve,
+                where="post",
+                color=colors[treatment],
+                linewidth=2.4,
+                zorder=3,
+            )
+            terminal_value = int(cumulative[-1])
+            cast(Any, axis).text(
+                view_end,
+                row_curve[-1],
+                f" {terminal_value}",
+                color=colors[treatment],
+                ha="left",
+                va="center",
+                fontsize=8.5,
+                fontweight="bold",
+            )
+            treatment_schedule = schedule.loc[
+                schedule["treatment"].astype(str).eq(treatment)
+            ].iloc[0]
+            for number, application_date in enumerate(
+                (
+                    treatment_schedule["first_application"],
+                    treatment_schedule["second_application"],
+                ),
+                start=1,
+            ):
+                if pd.isna(application_date):
                     continue
-                common_n = certain_common_n(midpoint)
-                experimental_total = experimental_n(midpoint, application_dates)
-                total_n = common_n + experimental_total
-                scaled_common = baseline + common_n * dose_scale
-                scaled_total = baseline + total_n * dose_scale
-                ax.fill_between(
-                    [segment_start, segment_end],
-                    baseline,
-                    scaled_common,
-                    color=common_fill_color,
-                    edgecolor=common_fill_color,
-                    linewidth=DATA_LINEWIDTH,
-                    zorder=2,
-                )
-                before_first_experimental = (
-                    treatment != "M0" and experimental_total == 0
-                )
-                ax.hlines(
-                    scaled_total,
-                    segment_start,
-                    segment_end,
-                    color=(common_color if before_first_experimental else line_color),
-                    linewidth=DATA_LINEWIDTH,
-                    linestyles=(
-                        common_linestyle
-                        if treatment == "M0" or before_first_experimental
-                        else "solid"
-                    ),
+                date = pd.Timestamp(application_date)
+                cast(Any, axis).scatter(
+                    [date],
+                    [y - 0.27 + 0.54 * number / 2.0],
+                    s=36,
+                    color=colors[treatment],
+                    edgecolor="white",
+                    linewidth=0.7,
                     zorder=4,
                 )
-
-            for start, end, uncertain_dose, _label in common_n_uncertain_periods:
-                split_points = [
-                    start,
-                    *sorted(date for date in exact_event_dates if start < date < end),
-                    end,
-                ]
-                for segment_start, segment_end in pairwise(split_points):
-                    midpoint = segment_start + (segment_end - segment_start) / 2
-                    common_lower_n = certain_common_n(midpoint)
-                    ax.fill_between(
-                        [segment_start, segment_end],
-                        baseline,
-                        baseline + common_lower_n * dose_scale,
-                        color=common_fill_color,
-                        edgecolor=common_fill_color,
-                        linewidth=DATA_LINEWIDTH,
-                        zorder=2,
-                    )
-                    experimental_total = experimental_n(midpoint, application_dates)
-                    lower_n = common_lower_n + experimental_total
-                    upper_n = lower_n + uncertain_dose
-                    rectangle_is_colored = experimental_total > 0
-                    rectangle_color = (
-                        fill_color(line_color, uncertain_fill_opacity)
-                        if rectangle_is_colored
-                        else uncertain_common_fill_color
-                    )
-                    ax.fill_between(
-                        [segment_start, segment_end],
-                        baseline + lower_n * dose_scale,
-                        baseline + upper_n * dose_scale,
-                        color=rectangle_color,
-                        linewidth=0,
-                        zorder=3,
-                    )
-                    ax.hlines(
-                        [
-                            baseline + lower_n * dose_scale,
-                            baseline + upper_n * dose_scale,
-                        ],
-                        segment_start,
-                        segment_end,
-                        color=rectangle_color,
-                        linewidth=DATA_LINEWIDTH,
-                        zorder=3.5,
-                    )
-
-            event_doses = {
-                date: (dose, 0.0) for date, dose in exact_common_events.items()
-            }
-            for application_date in application_dates:
-                common_delta, experimental_delta = event_doses.get(
-                    application_date, (0.0, 0.0)
+                axis.annotate(
+                    _short_spanish_date(date),
+                    (date, y - 0.27 + 0.54 * number / 2.0),
+                    xytext=(0, 7),
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7.5,
+                    color=colors[treatment],
                 )
-                event_doses[application_date] = (
-                    common_delta,
-                    experimental_delta + 100.0,
-                )
-            one_nanosecond = pd.Timedelta(1, unit="ns")
-            for event_date, (common_delta, experimental_delta) in sorted(
-                event_doses.items()
-            ):
-                if is_uncertain(event_date):
-                    continue
-                before = event_date - one_nanosecond
-                total_before = certain_common_n(before) + experimental_n(
-                    before, application_dates
-                )
-                total_after = total_before + common_delta + experimental_delta
-                experimental_before = experimental_n(before, application_dates)
-                common_only_before_experimental = (
-                    treatment != "M0"
-                    and experimental_before == 0
-                    and experimental_delta == 0
-                )
-                ax.vlines(
-                    event_date,
-                    baseline + total_before * dose_scale,
-                    baseline + total_after * dose_scale,
-                    color=(
-                        common_color if common_only_before_experimental else line_color
-                    ),
-                    linewidth=DATA_LINEWIDTH,
-                    linestyles=(
-                        common_linestyle
-                        if treatment == "M0" or common_only_before_experimental
-                        else "solid"
-                    ),
-                    zorder=5,
-                )
-
-            label_x = view_start - pd.Timedelta(days=5)
-            row_center = baseline + row_height / 2
-            final_total = common_n_total if treatment == "M0" else fertilized_n_total
-            ax.text(
-                label_x,
-                row_center + 0.13,
-                treatment,
-                ha="right",
-                va="center",
-                fontsize=11,
-                fontweight="bold",
-                clip_on=False,
-            )
-            ax.text(
-                label_x,
-                row_center - 0.08,
-                rf"$\approx${final_total:.0f} kg",
-                ha="right",
-                va="center",
-                fontsize=9.5,
-                clip_on=False,
-            )
-            ax.text(
-                label_x,
-                row_center - 0.26,
-                "solo común" if treatment == "M0" else "164 + 200",
-                ha="right",
-                va="center",
-                fontsize=8.5,
-                color="0.48",
-                clip_on=False,
-            )
-
-            if treatment == "M0":
-                ax.text(
-                    view_start + pd.Timedelta(days=2),
-                    baseline + 0.52,
-                    "sin N experimental adicional",
-                    ha="left",
-                    va="center",
-                    fontsize=9.25,
-                    color="0.40",
-                )
-            else:
-                for application_date in application_dates:
-                    if not view_start <= application_date <= view_end:
-                        continue
-                    ax.text(
-                        application_date,
-                        baseline - 0.055,
-                        f"{application_date.day} {application_labels[application_date.month]}",
-                        ha="center",
-                        va="top",
-                        fontsize=8.75,
-                        color="0.30",
-                    )
-
-        month_names = {
-            4: "abr",
-            5: "may",
-            6: "jun",
-            7: "jul",
-            8: "ago",
-            9: "sep",
-            10: "oct",
-            11: "nov",
-        }
-        month_starts = pd.date_range(
-            view_start,
-            view_end,
-            freq="MS",
-            inclusive="left",
-        )
-        month_ticks = month_starts + pd.Timedelta(days=14)
-        month_labels = [month_names[month] for month in month_starts.month]
-        ax.set_xticks(month_ticks, month_labels)
-        ax.set_xlim(view_start, view_end)
-        ax.set_ylim(-0.55, 5.16 + row_height)
-        ax.set_yticks([])
-        ax.grid(False)
-        ax.spines[["left", "right", "top"]].set_visible(False)
-
-        event_transform = ax.get_xaxis_transform()
-        top_event_y = 1.035
-        for start, end, _dose, label in common_n_uncertain_periods:
-            if end < view_start or start > view_end:
-                continue
-            ax.text(
-                start + (end - start) / 2,
-                top_event_y,
-                f"{label}\nfecha no consignada",
-                ha="center",
-                va="bottom",
-                fontsize=8.75,
-                color="0.48",
-                transform=event_transform,
-                clip_on=False,
-            )
-        if view_start <= grazing_closure <= view_end:
-            ax.text(
-                grazing_closure,
-                top_event_y,
-                "1 jul · +52 común\ncierre del pastoreo",
-                ha="center",
-                va="bottom",
-                fontsize=8.75,
-                color="0.38",
-                transform=event_transform,
-                clip_on=False,
-            )
-        for sample_date in DATES:
-            if not view_start <= sample_date <= view_end:
-                continue
-            event_label = DATE_LABELS[sample_date]
-            if sample_date == DATES[-1]:
-                event_label += "\nmuestreo y cosecha"
-            else:
-                event_label += "\nmuestreo"
-            ax.text(
+        sample_dates = sorted(pd.Timestamp(value) for value in sampling_dates.unique())
+        for sample_date in sample_dates:
+            cast(Any, axis).axvline(
                 sample_date,
-                top_event_y,
-                event_label,
+                color=self.palette[5],
+                linestyle="--",
+                linewidth=REFERENCE_LINEWIDTH,
+                alpha=0.60,
+                zorder=1,
+            )
+        for boundary in np.arange(len(treatment_order) - 1) + 0.5:
+            axis.axhline(
+                boundary,
+                color=mpl.rcParams["grid.color"],
+                linewidth=0.6,
+                alpha=0.55,
+                zorder=0,
+            )
+        axis.set_yticks(y_positions, treatment_order)
+        axis.set_ylim(-0.6, len(treatment_order) - 0.4)
+        cast(Any, axis).set_xlim(view_start, view_end + timedelta(days=10))
+        month_ticks = pd.date_range(
+            view_start.replace(day=1),
+            view_end + timedelta(days=10),
+            freq="MS",
+        )
+        cast(Any, axis).set_xticks(
+            month_ticks,
+            [SPANISH_MONTH_ABBREVIATIONS[date.month].title() for date in month_ticks],
+        )
+        axis.set_xlabel("Fecha")
+        axis.set_ylabel("Tratamiento · altura del escalón = N experimental acumulado")
+        axis.grid(axis="x", alpha=0.20)
+        axis.grid(axis="y", visible=False)
+        fig.subplots_adjust(left=0.12, right=0.95, bottom=0.15, top=0.75)
+        self._save_figure(
+            fig,
+            "figura_01_calendario_experimental_desde_xlsx",
+            title="Calendario y N experimental acumulado desde el libro XLSX",
+            subtitle="M0 permanece en 0; M1–M5 avanzan de 0 a 100 y 200 kg N ha⁻¹.",
+            note=(
+                "Solo se representa el N experimental respaldado por el libro. Las líneas "
+                "punteadas indican fechas de muestreo; el manejo común permanece en su tabla."
+            ),
+        )
+        return schedule
+
+    def water_inputs(self) -> pd.DataFrame:
+        data = self._require_data()
+        water = data.spec.water_monthly.copy()
+        totals = data.spec.water_period_totals.copy()
+        self._show("water_monthly", water)
+        self._show("water_period_totals", totals)
+
+        included = water.loc[water["included_in_study_months"]].copy()
+        included["irrigated_total_mm"] = (
+            included["rainfall_mm"] + included["supplemental_irrigation_mm"]
+        )
+        positions = np.arange(len(included), dtype=float)
+        bar_width = 0.28
+        bar_offset = 0.18
+        rainfall_color = self.palette[0]
+        irrigation_color = self.palette[6]
+        fig, axis = plt.subplots(figsize=(10.8, 5.7))
+        axis.bar(
+            positions - bar_offset,
+            included["rainfall_mm"],
+            width=bar_width,
+            color=rainfall_color,
+            label="Precipitación (ambos sectores)",
+        )
+        axis.bar(
+            positions + bar_offset,
+            included["supplemental_irrigation_mm"],
+            width=bar_width,
+            bottom=included["rainfall_mm"],
+            color=irrigation_color,
+            label="Riego suplementario",
+        )
+        for position, rainfall, irrigation, total in zip(
+            positions,
+            included["rainfall_mm"].to_numpy(float),
+            included["supplemental_irrigation_mm"].to_numpy(float),
+            included["irrigated_total_mm"].to_numpy(float),
+            strict=True,
+        ):
+            if irrigation > 0:
+                axis.text(
+                    position - bar_offset,
+                    rainfall + 3,
+                    f"{rainfall:.0f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8.5,
+                    color=rainfall_color,
+                )
+                axis.text(
+                    position + bar_offset,
+                    rainfall + irrigation / 2.0,
+                    f"+{irrigation:.0f}",
+                    ha="center",
+                    va="center",
+                    fontsize=8.5,
+                    color="white",
+                )
+            axis.text(
+                position,
+                total + 5,
+                f"{total:.0f}",
                 ha="center",
                 va="bottom",
-                fontsize=8.75,
-                color="0.38",
-                transform=event_transform,
-                clip_on=False,
+                fontsize=9.5,
             )
-        add_figure_header(
-            fig,
-            title,
-            subtitle=subtitle,
-        )
-        add_figure_note(
-            fig,
+        rainfall_total = float(included["rainfall_mm"].sum())
+        irrigation_total = float(included["supplemental_irrigation_mm"].sum())
+        axis.text(
+            0.02,
+            0.96,
             (
-                "El sombreado gris muestra el N común mínimo acumulado. M0 y los tramos "
-                "previos a la primera aplicación experimental se trazan con una línea "
-                "gris punteada; luego comienza el color del tratamiento.\n"
-                "Los rectángulos muestran el rango pre–post cuando la fecha de una "
-                "aplicación común no fue consignada; la trayectoria acumulada se omite "
-                "en esos tramos. Sus límites inferior y superior se trazan con líneas "
-                "del mismo tono que el relleno. "
-                "Al 16 sep: M1–M4 ≈364 y M5 ≈264 kg N ha⁻¹."
+                f"Secano: {rainfall_total:.0f} mm\n"
+                f"Riego: {rainfall_total + irrigation_total:.0f} mm "
+                f"({irrigation_total:.0f} mm adicionales)"
+            ),
+            transform=axis.transAxes,
+            ha="left",
+            va="top",
+            bbox={
+                "boxstyle": "round,pad=0.35",
+                "facecolor": "white",
+                "edgecolor": mpl.rcParams["axes.edgecolor"],
+                "alpha": 0.90,
+            },
+        )
+        axis.set_xticks(positions, included["month_label"])
+        axis.set_ylabel("Agua aportada (mm mes⁻¹)")
+        axis.set_xlabel("Mes del período experimental")
+        axis.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), ncol=2)
+        fig.subplots_adjust(left=0.09, right=0.98, bottom=0.25, top=0.80)
+        self._save_figure(
+            fig,
+            "figura_02_agua_desde_xlsx",
+            title="Entradas brutas de agua registradas en el libro XLSX",
+            subtitle="Precipitación y riego suplementario por mes incluido en el período experimental.",
+            note=(
+                "Estas entradas no son un balance hídrico ni una estimación del agua consumida. "
+                "La comparación entre sectores sigue siendo descriptiva."
             ),
         )
-        fig.subplots_adjust(
-            left=0.15,
-            right=0.985,
-            bottom=0.12,
-            top=0.78,
-        )
-        save_figure(fig, filename_stem)
-        mpl.show()
-        mpl.close(fig)
+        return water
 
-    plot_schedule_and_cumulative_n(
-        view_start=pd.Timestamp("2025-04-01"),
-        view_end=pd.Timestamp("2025-11-30"),
-        filename_stem="figura_01_cronograma_y_n_acumulado",
-        title="Cronograma de aplicaciones y N aplicado acumulado por tratamiento",
-        subtitle="común ≈164 + experimental (0 o 200) = ≈164–364 kg N ha⁻¹",
-        figure_height=8.2,
-        row_height=0.66,
-    )
-    plot_schedule_and_cumulative_n(
-        view_start=pd.Timestamp("2025-06-01"),
-        view_end=pd.Timestamp("2025-10-31"),
-        filename_stem="figura_01b_zoom_aplicaciones_experimentales",
-        title="Aplicaciones experimentales y N acumulado: detalle junio–octubre",
-        subtitle="M1–M5: 2 × 100 kg N ha⁻¹ · aplicaciones del 12 jun al 20 sep",
-        figure_height=8.8,
-        row_height=0.76,
-    )
-    yield "schedule"
+    # ------------------------------------------------------------------
+    # RCBD utilities
+    # ------------------------------------------------------------------
 
-    # Notebook step: water_inputs
-    water_inputs = pd.DataFrame(
-        {
-            "month": ["Jun", "Jul", "Ago", "Sep", "Oct", "Nov"],
-            "precipitation_mm": [43, 62, 101, 89, 141, 74],
-            "supplemental_irrigation_mm": [15, 0, 0, 30, 90, 30],
-        }
-    )
-    water_inputs["irrigated_total_mm"] = (
-        water_inputs["precipitation_mm"] + water_inputs["supplemental_irrigation_mm"]
-    )
-    assert water_inputs["precipitation_mm"].sum() == 510
-    assert water_inputs["supplemental_irrigation_mm"].sum() == 165
-    assert water_inputs["irrigated_total_mm"].sum() == 675
-    display_output(water_inputs)
+    @staticmethod
+    def _question_treatments(data: ExperimentData, question: str) -> list[str]:
+        if question == "timing_m1_m5":
+            return [value for value in data.spec.treatments if value != "M0"]
+        if question == "all_m0_m5":
+            return list(data.spec.treatments)
+        raise ValueError(f"Pregunta desconocida: {question}")
 
-    positions = np.arange(len(water_inputs), dtype=float)
-    bar_width = 0.28
-    bar_offset = 0.18
-    precipitation_positions = positions - bar_offset
-    irrigated_positions = positions + bar_offset
-    precipitation_color = PLOT_PALETTE[0]
-    irrigation_color = PLOT_PALETTE[6]
-    fig, ax = mpl.subplots(figsize=(10.8, 5.7))
-    ax.bar(
-        precipitation_positions,
-        water_inputs["precipitation_mm"],
-        width=bar_width,
-        color=precipitation_color,
-        label="Precipitación (ambos sectores)",
-    )
-    ax.bar(
-        irrigated_positions,
-        water_inputs["supplemental_irrigation_mm"],
-        width=bar_width,
-        bottom=water_inputs["precipitation_mm"],
-        color=irrigation_color,
-        label="Riego suplementario",
-    )
-    for position, precipitation, irrigation, total in zip(
-        positions,
-        water_inputs["precipitation_mm"].to_numpy(dtype=float),
-        water_inputs["supplemental_irrigation_mm"].to_numpy(dtype=float),
-        water_inputs["irrigated_total_mm"].to_numpy(dtype=float),
-        strict=True,
-    ):
-        if irrigation > 0:
-            ax.text(
-                position - bar_offset,
-                precipitation + 3,
-                f"{precipitation:.0f}",
-                ha="center",
-                va="bottom",
-                fontsize=8.5,
-                color=precipitation_color,
-            )
-            ax.text(
-                position + bar_offset,
-                precipitation + irrigation / 2,
-                f"+{irrigation:.0f}",
-                ha="center",
-                va="center",
-                fontsize=8.5,
-                color="white",
-            )
-        ax.text(
-            position,
-            total + 5,
-            f"{total:.0f}",
-            ha="center",
-            va="bottom",
-            fontsize=9.5,
+    @staticmethod
+    def _design_matrix(fit: Any, grid: pd.DataFrame) -> np.ndarray:
+        return np.asarray(
+            patsy.build_design_matrices(
+                [fit.model.data.design_info],
+                grid,
+                return_type="dataframe",
+            )[0],
+            dtype=float,
         )
 
-    ax.text(
-        0.02,
-        0.96,
-        "Secano: 510 mm\nRiego: 675 mm (165 mm adicionales)",
-        transform=ax.transAxes,
-        ha="left",
-        va="top",
-        bbox={
-            "boxstyle": "round,pad=0.35",
-            "facecolor": "white",
-            "edgecolor": mpl.rcParams["axes.edgecolor"],
-            "alpha": 0.90,
-        },
-    )
-    ax.set_xticks(positions, water_inputs["month"])
-    ax.set_ylabel("Agua aportada (mm mes⁻¹)")
-    ax.set_xlabel("Mes de 2025")
-    ax.legend(
-        loc="upper center",
-        bbox_to_anchor=(0.5, -0.14),
-        ncol=2,
-    )
-    add_figure_header(
-        fig,
-        "Precipitación y riego suplementario, junio–noviembre",
-    )
-    add_figure_note(
-        fig,
-        (
-            "La barra naranja desplazada representa exclusivamente el riego suplementario y comienza "
-            "a la altura de la precipitación común. El total mensual del sector regado aparece centrado; "
-            "cuando hubo riego también se indican por separado la precipitación y el aporte adicional. "
-            "Los aportes brutos no equivalen al agua utilizada por el cultivo."
-        ),
-    )
-    fig.subplots_adjust(
-        left=0.09,
-        right=0.98,
-        bottom=0.25,
-        top=0.87,
-    )
-    save_figure(fig, "figura_02_aportes_mensuales_de_agua")
-    mpl.show()
-    mpl.close(fig)
-    yield "water_inputs"
-
-    # Notebook step: rcbd_functions
-    @dataclass
-    class RCBDResult:
-        outcome: str
-        treatments: tuple[str, ...]
-        frame: pd.DataFrame
-        fit: Any
-        anova: pd.DataFrame
-        means: pd.DataFrame
-        pairwise: pd.DataFrame
-        cv_pct: float
-
-    def scalar_psturng_fn(q_value: float, groups: int, df: float) -> float:
-        value = psturng_fn(q_value, groups, df)
-        return float(np.asarray(value).reshape(-1)[0])
-
-    def maximal_nonsignificant_cliques(
-        levels: Sequence[str],
-        nonsignificant: dict[tuple[str, str], bool],
-    ) -> list[set[str]]:
-        nodes = list(levels)
-        cliques: list[set[str]] = []
-        for size in range(1, len(nodes) + 1):
-            for subset_tuple in combinations(nodes, size):
-                subset = set(subset_tuple)
-                if all(
-                    nonsignificant.get((a, b) if a <= b else (b, a), False)
-                    for a, b in combinations(subset, 2)
-                ):
-                    cliques.append(subset)
-        maximal = [
-            clique for clique in cliques if not any(clique < other for other in cliques)
-        ]
-        # Eliminar duplicados preservando contenido.
-        unique: list[set[str]] = []
-        for clique in maximal:
-            if clique not in unique:
-                unique.append(clique)
-        return unique
-
-    def compact_letters(
-        means: pd.DataFrame,
-        pairwise: pd.DataFrame,
-        *,
-        alpha: float = ALPHA,
-    ) -> dict[str, str]:
-        ordered = means.sort_values("estimate", ascending=False)["treatment"].tolist()
-        nonsig: dict[tuple[str, str], bool] = {}
-        for raw_row in pairwise.itertuples(index=False):
-            row = cast(Any, raw_row)
-            nonsig[tuple(sorted((row.group1, row.group2)))] = row.p_tukey >= alpha
-        cliques = maximal_nonsignificant_cliques(ordered, nonsig)
-        cliques.sort(
-            key=lambda clique: max(
-                means.set_index("treatment").loc[list(clique), "estimate"]
-            ),
-            reverse=True,
-        )
-        alphabet = list("abcdefghijklmnopqrstuvwxyz")
-        if len(cliques) > len(alphabet):
-            raise RuntimeError("Demasiadas clases para el alfabeto compacto")
-        letters = {level: "" for level in ordered}
-        for letter, clique in zip(alphabet, cliques):
-            for level in clique:
-                letters[level] += letter
-        return letters
-
-    def adjusted_treatment_means(
+    def _marginal_mean_vectors(
+        self,
         fit: Any,
+        *,
         treatments: Sequence[str],
-        blocks: Sequence[str] = BLOCKS,
-    ) -> tuple[pd.DataFrame, dict[str, np.ndarray], np.ndarray]:
-        beta = fit.params.to_numpy()
-        covariance = fit.cov_params().to_numpy()
-        design_info = fit.model.data.design_info
-
+        blocks: Sequence[str],
+    ) -> dict[str, np.ndarray]:
         vectors: dict[str, np.ndarray] = {}
-        rows: list[dict[str, object]] = []
         for treatment in treatments:
-            new = pd.DataFrame(
+            grid = pd.DataFrame(
                 {
                     "treatment": [treatment] * len(blocks),
                     "block": list(blocks),
                 }
             )
-            new["treatment"] = categorical(new["treatment"], treatments)
-            new["block"] = categorical(new["block"], blocks)
-            design = np.asarray(patsy_api.build_design_matrices([design_info], new)[0])
-            xbar = design.mean(axis=0)
-            estimate = float(xbar @ beta)
-            se = float(np.sqrt(xbar @ covariance @ xbar))
-            vectors[treatment] = xbar
-            rows.append(
-                {
-                    "treatment": treatment,
-                    "estimate": estimate,
-                    "se": se,
-                    "ci_low": estimate - stats.t.ppf(0.975, fit.df_resid) * se,
-                    "ci_high": estimate + stats.t.ppf(0.975, fit.df_resid) * se,
-                }
-            )
-        return pd.DataFrame(rows), vectors, covariance
+            vectors[treatment] = self._design_matrix(fit, grid).mean(axis=0)
+        return vectors
 
-    def fit_rcbd(
+    @staticmethod
+    def _linear_estimate(
+        fit: Any,
+        vector: np.ndarray,
+    ) -> tuple[float, float, float, float, float]:
+        beta = np.asarray(fit.params, dtype=float)
+        covariance = np.asarray(fit.cov_params(), dtype=float)
+        estimate = float(vector @ beta)
+        variance = float(vector @ covariance @ vector)
+        standard_error = math.sqrt(max(variance, 0.0))
+        df = float(fit.df_resid)
+        critical = float(stats.t.ppf(0.975, df))
+        if standard_error == 0.0:
+            statistic = np.inf if estimate != 0.0 else 0.0
+            p_value = 0.0 if estimate != 0.0 else 1.0
+        else:
+            statistic = estimate / standard_error
+            p_value = float(2.0 * stats.t.sf(abs(statistic), df))
+        return (
+            estimate,
+            standard_error,
+            estimate - critical * standard_error,
+            estimate + critical * standard_error,
+            p_value,
+        )
+
+    def _fit_rcbd(
+        self,
         frame: pd.DataFrame,
         *,
         outcome: str,
-        treatments: Sequence[str],
-    ) -> RCBDResult:
-        subset = frame.loc[frame["treatment"].astype(str).isin(treatments)].copy()
-        subset = subset.dropna(subset=[outcome, "block", "treatment"])
-        subset["treatment"] = categorical(subset["treatment"], treatments)
-        subset["block"] = categorical(subset["block"], BLOCKS)
-
-        fit = smf_api.ols(f"{outcome} ~ C(treatment) + C(block)", data=subset).fit()
-        anova = sm_api.stats.anova_lm(fit, typ=2)
-        means, vectors, covariance = adjusted_treatment_means(
-            fit, treatments=treatments
-        )
-
-        pairs: list[dict[str, object]] = []
-        k = len(treatments)
-        q_critical = float(qsturng_fn(1.0 - ALPHA, k, fit.df_resid))
-        for group1, group2 in combinations(treatments, 2):
-            contrast = vectors[group1] - vectors[group2]
-            difference = float(contrast @ fit.params.to_numpy())
-            se_difference = float(np.sqrt(contrast @ covariance @ contrast))
-            q_stat = math.sqrt(2.0) * abs(difference) / se_difference
-            p_tukey = scalar_psturng_fn(q_stat, k, fit.df_resid)
-            half_width = q_critical * se_difference / math.sqrt(2.0)
-            pairs.append(
-                {
-                    "group1": group1,
-                    "group2": group2,
-                    "difference": difference,
-                    "se": se_difference,
-                    "ci_low": difference - half_width,
-                    "ci_high": difference + half_width,
-                    "p_tukey": p_tukey,
-                    "reject": p_tukey < ALPHA,
-                }
-            )
-        pairwise = pd.DataFrame(pairs)
-        global_p = float(anova.loc["C(treatment)", "PR(>F)"])
-        if global_p < ALPHA:
-            letters = compact_letters(means, pairwise)
-            means["tukey_group"] = means["treatment"].map(letters)
-        else:
-            means["tukey_group"] = "—"
-        means["n"] = means["treatment"].map(
-            subset.groupby("treatment", observed=True)[outcome].count()
-        )
-
-        mse = float(anova.loc["Residual", "sum_sq"] / anova.loc["Residual", "df"])
-        cv_pct = 100.0 * math.sqrt(mse) / float(cast(Any, subset[outcome].mean()))
-        return RCBDResult(
-            outcome=outcome,
-            treatments=tuple(treatments),
-            frame=subset,
-            fit=fit,
-            anova=anova,
-            means=means,
-            pairwise=pairwise,
-            cv_pct=cv_pct,
-        )
-
-    def rcbd_result_row(
-        result: RCBDResult,
-        *,
         sector: str,
         date: pd.Timestamp | None,
-        comparison: str,
-    ) -> dict[str, object]:
-        return {
-            "outcome": result.outcome,
-            "label": OUTCOME_LABELS.get(result.outcome, result.outcome),
-            "sector": sector,
-            "date": date,
-            "comparison": comparison,
-            "n": len(result.frame),
-            "p_treatment": float(cast(Any, result.anova.loc["C(treatment)", "PR(>F)"])),
-            "p_block": float(cast(Any, result.anova.loc["C(block)", "PR(>F)"])),
-            "cv_pct": result.cv_pct,
-        }
-
-    def add_bh_within_families(
-        frame: pd.DataFrame,
-        *,
-        p_column: str,
-        family_columns: Sequence[str],
-        output_column: str = "p_bh",
-    ) -> pd.DataFrame:
-        """Attach FDR-adjusted p-values without mixing inferential families."""
-        result = frame.copy()
-        result[output_column] = np.nan
-        grouped = result.groupby(list(family_columns), observed=True, dropna=False)
-        for indices in grouped.groups.values():
-            index = list(indices)
-            result.loc[index, output_column] = benjamini_hochberg(
-                result.loc[index, p_column].astype(float).to_numpy()
+        question: str,
+    ) -> RCBDResult:
+        data = self._require_data()
+        treatments = self._question_treatments(data, question)
+        subset = frame.loc[
+            frame["sector"].astype(str).eq(sector)
+            & frame["treatment"].astype(str).isin(treatments),
+            ["block", "treatment", outcome],
+        ].dropna(subset=[outcome])
+        if subset.empty:
+            raise ValueError(
+                f"Sin observaciones para {sector}, {outcome}, {question}, {date}."
             )
+        subset = subset.copy()
+        subset["block"] = subset["block"].astype(str)
+        subset["treatment"] = pd.Categorical(
+            subset["treatment"].astype(str),
+            categories=treatments,
+            ordered=True,
+        )
+        fit = smf.ols(f"{outcome} ~ C(treatment) + C(block)", data=subset).fit()
+        anova = sm.stats.anova_lm(fit, typ=2)
+        treatment_row = next(
+            name for name in anova.index if str(name).startswith("C(treatment)")
+        )
+        global_p = _as_float(anova.loc[treatment_row, "PR(>F)"])
+        blocks = sorted(subset["block"].unique().tolist())
+        vectors = self._marginal_mean_vectors(
+            fit,
+            treatments=treatments,
+            blocks=blocks,
+        )
+        mean_rows: list[dict[str, object]] = []
+        for treatment in treatments:
+            estimate, se, low, high, _ = self._linear_estimate(fit, vectors[treatment])
+            mean_rows.append(
+                {
+                    "sector": sector,
+                    "date": date,
+                    "outcome": outcome,
+                    "question": question,
+                    "treatment": treatment,
+                    "estimate": estimate,
+                    "standard_error": se,
+                    "ci_low": low,
+                    "ci_high": high,
+                    "n": int(subset["treatment"].astype(str).eq(treatment).sum()),
+                }
+            )
+        marginal_means = pd.DataFrame(mean_rows)
+
+        pairwise_rows: list[dict[str, object]] = []
+        treatment_count = len(treatments)
+        tukey_critical = float(qsturng(1.0 - self.alpha, treatment_count, fit.df_resid))
+        covariance = np.asarray(fit.cov_params(), dtype=float)
+        beta = np.asarray(fit.params, dtype=float)
+        for left_index, left in enumerate(treatments):
+            for right in treatments[left_index + 1 :]:
+                vector = vectors[left] - vectors[right]
+                estimate = float(vector @ beta)
+                variance = float(vector @ covariance @ vector)
+                se_difference = math.sqrt(max(variance, 0.0))
+                if se_difference == 0.0:
+                    q_statistic = np.inf if estimate != 0.0 else 0.0
+                else:
+                    q_statistic = abs(estimate) * math.sqrt(2.0) / se_difference
+                p_value = float(
+                    np.asarray(
+                        psturng(q_statistic, treatment_count, fit.df_resid)
+                    ).reshape(-1)[0]
+                )
+                half_width = tukey_critical * se_difference / math.sqrt(2.0)
+                pairwise_rows.append(
+                    {
+                        "sector": sector,
+                        "date": date,
+                        "outcome": outcome,
+                        "question": question,
+                        "left": left,
+                        "right": right,
+                        "difference": estimate,
+                        "ci_low_tukey": estimate - half_width,
+                        "ci_high_tukey": estimate + half_width,
+                        "p_tukey": p_value,
+                        "global_treatment_p": global_p,
+                        "display_as_confirmatory": bool(global_p < self.alpha),
+                    }
+                )
+        pairwise = pd.DataFrame(pairwise_rows)
+        result = RCBDResult(
+            fit=fit,
+            anova=anova,
+            marginal_means=marginal_means,
+            pairwise=pairwise,
+            global_p=global_p,
+            question=question,
+            sector=sector,
+            outcome=outcome,
+            date=date,
+        )
+        key = f"{sector}|{self._display_date(date)}|{outcome}|{question}"
+        self.rcbd_results[key] = result
         return result
 
-    yield "rcbd_functions"
-
-    # Notebook step: longitudinal_anova
-    LONGITUDINAL_OUTCOMES = [
-        "biomass_kg_ha_used",
-        "n_pct",
-        "q_kg_n_ha",
-        "nni_revised",
-    ]
-
-    longitudinal_rcbd_rows: list[dict[str, object]] = []
-    longitudinal_rcbd_models: dict[tuple[str, pd.Timestamp, str, str], RCBDResult] = {}
-
-    for outcome in LONGITUDINAL_OUTCOMES:
-        for date in DATES:
-            for sector in SECTORS:
-                frame = data.longitudinal.loc[
-                    data.longitudinal["date"].astype("datetime64[ns]").eq(date)
-                    & data.longitudinal["sector"].astype(str).eq(sector)
-                ].copy()
-                for treatments, comparison in [
-                    (FERTILIZED, "M1–M5"),
-                    (TREATMENTS, "M0–M5"),
-                ]:
-                    result = fit_rcbd(
-                        frame,
-                        outcome=outcome,
-                        treatments=treatments,
-                    )
-                    key = (outcome, date, sector, comparison)
-                    longitudinal_rcbd_models[key] = result
-                    longitudinal_rcbd_rows.append(
-                        rcbd_result_row(
-                            result,
-                            sector=sector,
-                            date=date,
-                            comparison=comparison,
-                        )
-                    )
-
-    longitudinal_rcbd = pd.DataFrame(longitudinal_rcbd_rows)
-    longitudinal_rcbd["date_label"] = longitudinal_rcbd["date"].map(DATE_LABELS)
-    longitudinal_rcbd["variable_family"] = np.where(
-        longitudinal_rcbd["outcome"].isin(["biomass_kg_ha_used", "n_pct"]),
-        "secundaria_primitiva",
-        "apoyo_derivado",
-    )
-    longitudinal_rcbd["inference_tier"] = np.where(
-        longitudinal_rcbd["comparison"].eq("M1–M5"),
-        longitudinal_rcbd["variable_family"],
-        "complementaria",
-    )
-    longitudinal_rcbd = add_bh_within_families(
-        longitudinal_rcbd,
-        p_column="p_treatment",
-        family_columns=["sector", "comparison", "variable_family"],
-    )
-
-    display_output(
-        longitudinal_rcbd[
-            [
-                "label",
-                "date_label",
-                "sector",
-                "comparison",
-                "n",
-                "p_treatment",
-                "p_bh",
-                "p_block",
-                "cv_pct",
-            ]
-        ].round(4)
-    )
-    yield "longitudinal_anova"
-
-    # Notebook step: observed_trajectories
-    def treatment_trajectory_plot(
+    def _planned_extra_n_contrast(
+        self,
         frame: pd.DataFrame,
         *,
         outcome: str,
-        treatments: Sequence[str] = TREATMENTS,
-        filename_stem: str | None = None,
-    ) -> None:
-        treatment_order = list(treatments)
-        subset = (
-            frame.loc[frame["treatment"].astype(str).isin(treatment_order)]
-            .dropna(subset=[outcome])
-            .copy()
+        sector: str,
+        date: pd.Timestamp | None,
+    ) -> dict[str, object]:
+        data = self._require_data()
+        result = self._fit_rcbd(
+            frame,
+            outcome=outcome,
+            sector=sector,
+            date=date,
+            question="all_m0_m5",
         )
-        counts = np.asarray(
-            subset.groupby(["sector", "treatment", "date"], observed=True)[
-                outcome
-            ].count(),
-            dtype=int,
+        treatments = list(data.spec.treatments)
+        blocks = list(data.spec.blocks)
+        vectors = self._marginal_mean_vectors(
+            result.fit,
+            treatments=treatments,
+            blocks=blocks,
         )
-        counts = counts[counts > 0]
-        minimum_n = int(counts.min())
-        maximum_n = int(counts.max())
-        sample_size_text = (
-            rf"$n = {minimum_n}$ parcelas por punto"
-            if minimum_n == maximum_n
-            else rf"$n = {minimum_n}$–${maximum_n}$ parcelas por punto"
+        fertilized = [treatment for treatment in treatments if treatment != "M0"]
+        vector = (
+            np.mean([vectors[treatment] for treatment in fertilized], axis=0)
+            - vectors["M0"]
         )
-        sample_size_latex = (
-            rf"\ensuremath{{n = {minimum_n}}} parcelas por punto"
-            if minimum_n == maximum_n
-            else (
-                rf"\ensuremath{{n = {minimum_n}}}--"
-                rf"\ensuremath{{{maximum_n}}} parcelas por punto"
-            )
-        )
+        estimate, se, low, high, p_value = self._linear_estimate(result.fit, vector)
+        return {
+            "sector": sector,
+            "date": date,
+            "outcome": outcome,
+            "contrast": "mean_M1_M5_minus_M0",
+            "estimate": estimate,
+            "standard_error": se,
+            "ci_low": low,
+            "ci_high": high,
+            "p_value": p_value,
+        }
 
-        def mean_t_interval(values: Any) -> tuple[float, float]:
-            observed_values = np.asarray(values, dtype=float)
-            mean = float(observed_values.mean())
-            if len(observed_values) < 2:
-                return mean, mean
-            half_width = float(
-                stats.t.ppf(0.975, len(observed_values) - 1)
-                * stats.sem(observed_values)
-            )
-            return mean - half_width, mean + half_width
+    # ------------------------------------------------------------------
+    # Date-specific and final analyses
+    # ------------------------------------------------------------------
 
-        date_centers = np.arange(len(DATES), dtype=float)
-        date_center_by_date = dict(zip(DATES, date_centers, strict=True))
-        treatment_offsets = dict(
+    def longitudinal_anova(self) -> pd.DataFrame:
+        data = self._require_data()
+        outcomes = [
+            ("biomass_kg_ha", "secondary"),
+            ("n_pct", "secondary"),
+            ("q_kg_n_ha", "supporting_derived"),
+            ("nni_primary", "supporting_derived"),
+        ]
+        rows: list[dict[str, object]] = []
+        pairwise_rows: list[pd.DataFrame] = []
+        means_rows: list[pd.DataFrame] = []
+        dates = [
+            pd.Timestamp(value) for value in data.longitudinal["date"].cat.categories
+        ]
+        for sector in data.spec.sectors:
+            for date in dates:
+                date_frame = data.longitudinal.loc[
+                    pd.to_datetime(data.longitudinal["date"].astype(str)).eq(date)
+                ]
+                for outcome, hierarchy in outcomes:
+                    for question in ("timing_m1_m5", "all_m0_m5"):
+                        result = self._fit_rcbd(
+                            date_frame,
+                            outcome=outcome,
+                            sector=sector,
+                            date=date,
+                            question=question,
+                        )
+                        treatment_row = next(
+                            name
+                            for name in result.anova.index
+                            if str(name).startswith("C(treatment)")
+                        )
+                        rows.append(
+                            {
+                                "hierarchy": hierarchy,
+                                "sector": sector,
+                                "date": date,
+                                "outcome": outcome,
+                                "question": question,
+                                "n": int(result.fit.nobs),
+                                "df_treatment": _as_float(
+                                    result.anova.loc[treatment_row, "df"]
+                                ),
+                                "f_statistic": _as_float(
+                                    result.anova.loc[treatment_row, "F"]
+                                ),
+                                "p_raw": result.global_p,
+                            }
+                        )
+                        means_rows.append(result.marginal_means)
+                        pairwise_rows.append(result.pairwise)
+        summary = pd.DataFrame(rows)
+        summary["family"] = (
+            summary["hierarchy"].astype(str) + "|" + summary["question"].astype(str)
+        )
+        summary["p_fdr"] = np.nan
+        for indices in summary.groupby("family").groups.values():
+            index_list = list(indices)
+            summary.loc[index_list, "p_fdr"] = benjamini_hochberg(
+                summary.loc[index_list, "p_raw"].to_numpy(float)
+            )
+        summary["decision_fdr"] = np.where(
+            summary["p_fdr"] < self.alpha, "detected", "not_detected"
+        )
+        self.tables["anova_by_date_marginal_means"] = pd.concat(
+            means_rows, ignore_index=True
+        )
+        self.tables["anova_by_date_pairwise_tukey"] = pd.concat(
+            pairwise_rows, ignore_index=True
+        )
+        return self._show("anova_by_date", summary)
+
+    def observed_trajectories(self) -> pd.DataFrame:
+        data = self._require_data()
+        outcomes = ["biomass_kg_ha", "n_pct", "q_kg_n_ha", "nni_primary"]
+        rows: list[pd.DataFrame] = []
+        for outcome in outcomes:
+            summary = (
+                data.longitudinal.groupby(
+                    ["sector", "treatment", "date", "date_label"],
+                    observed=True,
+                )[outcome]
+                .agg(["count", "mean", "std"])
+                .reset_index()
+            )
+            summary["standard_error"] = summary["std"] / np.sqrt(summary["count"])
+            critical = summary["count"].map(_student_t_critical)
+            summary["ci_low"] = summary["mean"] - critical * summary["standard_error"]
+            summary["ci_high"] = summary["mean"] + critical * summary["standard_error"]
+            summary["outcome"] = outcome
+            rows.append(summary)
+        trajectories = pd.concat(rows, ignore_index=True)
+        self._show("observed_trajectories", trajectories)
+
+        labels = {
+            "biomass_kg_ha": "Biomasa (kg MS ha⁻¹)",
+            "n_pct": "N (%)",
+        }
+        treatment_colors = dict(
             zip(
-                treatment_order,
-                np.linspace(-0.31, 0.31, len(treatment_order)),
+                data.spec.treatments,
+                self.palette[: len(data.spec.treatments)],
                 strict=True,
             )
         )
-        subset["plot_position"] = subset["date"].astype("datetime64[ns]").map(
-            date_center_by_date
-        ).astype(float) + subset["treatment"].astype(str).map(treatment_offsets).astype(
-            float
-        )
-        treatment_colors = {
-            treatment: TREATMENT_COLORS[treatment] for treatment in treatment_order
-        }
-        treatment_positions = [
-            center + treatment_offsets[treatment]
-            for center in date_centers
-            for treatment in treatment_order
-        ]
-        treatment_labels = treatment_order * len(DATES)
-
-        fig, axes = mpl.subplots(1, 2, figsize=(12.2, 5.3), sharex=True, sharey=True)
-        axes_array = np.asarray(axes).ravel()
-        for panel_index, sector in enumerate(SECTORS):
-            ax = axes_array[panel_index]
-            sns_api.pointplot(
-                data=subset.loc[subset["sector"].astype(str).eq(sector)],
-                x="plot_position",
-                y=outcome,
-                hue="treatment",
-                hue_order=treatment_order,
-                estimator="mean",
-                errorbar=mean_t_interval,
-                palette=treatment_colors,
-                markers="o",
-                linestyles="none",
-                native_scale=True,
-                capsize=CATEGORICAL_ERRORBAR_CAPSIZE,
-                err_kws={"linewidth": INTERVAL_LINEWIDTH},
-                markersize=MARKER_SIZE,
-                legend=False,
-                ax=ax,
+        for outcome, ylabel in labels.items():
+            subset = trajectories.loc[trajectories["outcome"].eq(outcome)]
+            fig, axes = plt.subplots(
+                1, len(data.spec.sectors), figsize=(12.2, 5.3), sharey=True
             )
-            ax.set_title(sector.upper())
-            ax.set_xticks(treatment_positions, treatment_labels, minor=True)
-            ax.tick_params(axis="x", which="minor", pad=5, length=0)
-            ax.set_xticks(date_centers, [DATE_LABELS[date] for date in DATES])
-            ax.tick_params(axis="x", which="major", pad=25, length=0)
-            ax.set_xlabel("")
-            if panel_index == 0:
-                ax.set_ylabel(OUTCOME_LABELS[outcome])
-            else:
-                ax.set_ylabel("")
-
-        add_figure_header(
-            fig,
-            OBSERVED_BY_DATE_TITLES[outcome],
-            subtitle=(rf"Media $\pm$ IC $t$ del $95\,\%$ $\cdot$ {sample_size_text}"),
-            latex_subtitle=(
-                r"Media \ensuremath{\pm} IC \ensuremath{t} del 95 \% "
-                rf"\ensuremath{{\cdot}} {sample_size_latex}"
-            ),
-        )
-        add_figure_note(
-            fig,
-            (
-                "Fechas equidistantes en orden cronológico; los puntos no se conectan.\n"
-                "M0: sin N experimental adicional. M1–M5: igual dosis adicional, distinto calendario."
-            ),
-        )
-        fig.subplots_adjust(left=0.07, right=0.98, bottom=0.23, top=0.76, wspace=0.1)
-        if filename_stem is not None:
-            save_figure(fig, filename_stem)
-        mpl.show()
-        mpl.close(fig)
-
-    for outcome in LONGITUDINAL_OUTCOMES:
-        treatment_trajectory_plot(
-            data.longitudinal,
-            outcome=outcome,
-            filename_stem=f"anexo_trayectorias_observadas_{outcome}",
-        )
-    yield "observed_trajectories"
-
-    # Notebook step: final_outcomes
-    FINAL_OUTCOMES = [
-        "panicle_density_m2",
-        "estimated_seeds_per_panicle",
-        "w1000_g",
-        "clean_yield_kg_ha",
-        "harvest_index_pct",
-        "cleaning_loss_pct",
-    ]
-
-    final_rcbd_rows: list[dict[str, object]] = []
-    final_rcbd_models: dict[tuple[str, str, str], RCBDResult] = {}
-    for outcome in FINAL_OUTCOMES:
-        for sector in SECTORS:
-            frame = data.harvest.loc[
-                data.harvest["sector"].astype(str).eq(sector)
-            ].copy()
-            for treatments, comparison in [
-                (FERTILIZED, "M1–M5"),
-                (TREATMENTS, "M0–M5"),
-            ]:
-                result = fit_rcbd(
-                    frame,
-                    outcome=outcome,
-                    treatments=treatments,
+            axes_array = np.atleast_1d(axes)
+            for axis, sector in zip(axes_array, data.spec.sectors, strict=True):
+                sector_data = subset.loc[subset["sector"].astype(str).eq(sector)]
+                date_table = (
+                    sector_data[["date", "date_label"]]
+                    .drop_duplicates()
+                    .sort_values("date")
                 )
-                final_rcbd_models[(outcome, sector, comparison)] = result
-                final_rcbd_rows.append(
-                    rcbd_result_row(
-                        result,
-                        sector=sector,
-                        date=None,
-                        comparison=comparison,
+                date_levels = date_table["date_label"].astype(str).tolist()
+                date_centers = np.arange(len(date_levels), dtype=float)
+                positions = dict(zip(date_levels, date_centers, strict=True))
+                treatment_offsets = dict(
+                    zip(
+                        data.spec.treatments,
+                        np.linspace(-0.31, 0.31, len(data.spec.treatments)),
+                        strict=True,
                     )
                 )
-
-    # Rendimiento sin limpiar se conserva solo como sensibilidad de medición.
-    for outcome, treatment_sets in [
-        (
-            "dirty_yield_kg_ha",
-            [(FERTILIZED, "M1–M5"), (TREATMENTS, "M0–M5")],
-        )
-    ]:
-        for sector in SECTORS:
-            frame = data.harvest.loc[
-                data.harvest["sector"].astype(str).eq(sector)
-            ].copy()
-            for treatments, comparison in treatment_sets:
-                result = fit_rcbd(frame, outcome=outcome, treatments=treatments)
-                final_rcbd_models[(outcome, sector, comparison)] = result
-                final_rcbd_rows.append(
-                    rcbd_result_row(
-                        result,
-                        sector=sector,
-                        date=None,
-                        comparison=comparison,
+                for treatment in data.spec.treatments:
+                    treatment_data = sector_data.loc[
+                        sector_data["treatment"].astype(str).eq(treatment)
+                    ].sort_values("date")
+                    x = [
+                        positions[str(label)] + treatment_offsets[treatment]
+                        for label in treatment_data["date_label"]
+                    ]
+                    axis.errorbar(
+                        x,
+                        treatment_data["mean"],
+                        yerr=np.vstack(
+                            [
+                                treatment_data["mean"] - treatment_data["ci_low"],
+                                treatment_data["ci_high"] - treatment_data["mean"],
+                            ]
+                        ),
+                        marker="o",
+                        markerfacecolor=(
+                            "white"
+                            if treatment == "M0"
+                            else treatment_colors[treatment]
+                        ),
+                        markeredgecolor=treatment_colors[treatment],
+                        markersize=MARKER_SIZE,
+                        linestyle="none",
+                        capsize=ERRORBAR_CAPSIZE,
+                        elinewidth=INTERVAL_LINEWIDTH,
+                        label=treatment,
+                        color=treatment_colors[treatment],
                     )
+                treatment_positions = [
+                    center + treatment_offsets[treatment]
+                    for center in date_centers
+                    for treatment in data.spec.treatments
+                ]
+                axis.set_xticks(
+                    treatment_positions,
+                    list(data.spec.treatments) * len(date_centers),
+                    minor=True,
                 )
+                axis.tick_params(axis="x", which="minor", pad=5, length=0)
+                axis.set_xticks(date_centers, date_levels)
+                axis.tick_params(axis="x", which="major", pad=25, length=0)
+                axis.set_title(sector.upper())
+                axis.set_xlabel("")
+            axes_array[0].set_ylabel(ylabel)
+            fig.subplots_adjust(
+                left=0.08,
+                right=0.98,
+                bottom=0.23,
+                top=0.69,
+                wspace=0.10,
+            )
+            self._save_figure(
+                fig,
+                f"trayectorias_observadas_{outcome}",
+                title=f"Trayectorias observadas: {ylabel}",
+                subtitle="Media e intervalo t del 95 % por tratamiento, fecha y sector.",
+                note=(
+                    "Fechas equidistantes en orden cronológico; los puntos no se conectan. "
+                    "M0 no recibió N experimental adicional; M1–M5 recibieron igual dosis total."
+                ),
+            )
+        return trajectories
 
-    final_rcbd = pd.DataFrame(final_rcbd_rows)
-    final_rcbd["inference_tier"] = final_rcbd["outcome"].map(
-        {
-            "clean_yield_kg_ha": "primaria",
-            "dirty_yield_kg_ha": "sensibilidad",
-            "panicle_density_m2": "secundaria",
-            "estimated_seeds_per_panicle": "apoyo_reconstruido",
-            "w1000_g": "secundaria",
-            "harvest_index_pct": "apoyo_derivado",
-            "cleaning_loss_pct": "apoyo_derivado",
-        }
-    )
-    final_rcbd = add_bh_within_families(
-        final_rcbd,
-        p_column="p_treatment",
-        family_columns=["sector", "comparison", "inference_tier"],
-    )
-    final_rcbd.loc[final_rcbd["inference_tier"].eq("primaria"), "p_bh"] = (
-        final_rcbd.loc[final_rcbd["inference_tier"].eq("primaria"), "p_treatment"]
-    )
-
-    # EAN y productividad aparente del agua son transformaciones deterministas
-    # del rendimiento; se resumen, pero no generan pruebas inferenciales nuevas.
-    derived_descriptive = (
-        data.harvest.melt(
-            id_vars=["sector", "treatment"],
-            value_vars=["agronomic_efficiency", "apparent_water_productivity"],
-            var_name="outcome",
-            value_name="value",
-        )
-        .dropna(subset=["value"])
-        .groupby(["outcome", "sector", "treatment"], observed=True)["value"]
-        .agg(mean="mean", sd="std", n="count")
-        .reset_index()
-    )
-    derived_descriptive["label"] = derived_descriptive["outcome"].map(OUTCOME_LABELS)
-    derived_descriptive["analysis_role"] = "descriptivo; transformación del rendimiento"
-    display_output(
-        final_rcbd[
+    def final_outcomes(self) -> pd.DataFrame:
+        data = self._require_data()
+        outcome_metadata = pd.DataFrame(
             [
-                "label",
-                "sector",
-                "comparison",
-                "inference_tier",
-                "n",
-                "p_treatment",
-                "p_bh",
-                "p_block",
-                "cv_pct",
-            ]
-        ].round(4)
-    )
-    display_output(
-        Markdown(
-            "**EAN y productividad aparente del agua:** resumen descriptivo únicamente; "
-            "no se vuelven a contar como desenlaces inferenciales independientes."
+                (
+                    "clean_yield_kg_ha",
+                    "primary",
+                    "primitive-derived",
+                    "Rendimiento limpio",
+                ),
+                (
+                    "dirty_yield_kg_ha",
+                    "supporting",
+                    "primitive-derived",
+                    "Rendimiento sin limpiar",
+                ),
+                (
+                    "panicle_density_m2",
+                    "supporting",
+                    "primitive-derived",
+                    "Densidad de panojas",
+                ),
+                (
+                    "w1000_g",
+                    "supporting",
+                    "technical-replicate-derived",
+                    "Peso de mil semillas",
+                ),
+                (
+                    "estimated_seeds_per_panicle",
+                    "supporting_derived",
+                    "reconstructed",
+                    "Semillas estimadas por panoja",
+                ),
+                (
+                    "cleaning_loss_pct",
+                    "supporting_derived",
+                    "deterministic",
+                    "Merma de limpieza",
+                ),
+                (
+                    "harvest_index_pct",
+                    "supporting_derived",
+                    "deterministic",
+                    "Índice de cosecha",
+                ),
+                (
+                    "agronomic_efficiency",
+                    "descriptive_derived",
+                    "deterministic",
+                    "Eficiencia agronómica",
+                ),
+                (
+                    "apparent_water_productivity",
+                    "descriptive_derived",
+                    "deterministic",
+                    "Productividad aparente del agua",
+                ),
+            ],
+            columns=["outcome", "hierarchy", "lineage", "label"],
         )
-    )
-    display_output(derived_descriptive.round(3))
-    yield "final_outcomes"
-
-    # Sensibilidad formal de los dos registros de materia seca discordantes.
-    dry_matter_rows: list[dict[str, object]] = []
-    for policy in ["recorded", "ratio", "exclude"]:
-        policy_data = (
-            data
-            if policy == DRY_MATTER_POLICY
-            else load_experiment_data(WORKBOOK_PATH, dry_matter_policy=policy)
-        )
-        final_date = policy_data.longitudinal.loc[
-            policy_data.longitudinal["date"].astype("datetime64[ns]").eq(DATES[-1])
+        self._show("final_outcome_hierarchy", outcome_metadata)
+        primitive_columns = [
+            "sample_id",
+            "sector",
+            "block",
+            "treatment",
+            "panicle_count",
+            "dirty_mass_g",
+            "clean_mass_g",
+            "w100_1_g",
+            "w100_2_g",
+            "w100_3_g",
         ]
-        for outcome in ["biomass_kg_ha_used", "q_kg_n_ha", "nni_revised"]:
-            for sector in SECTORS:
-                sector_frame = final_date.loc[
-                    final_date["sector"].astype(str).eq(sector)
-                ].copy()
-                for treatments, comparison in [
-                    (FERTILIZED, "M1–M5"),
-                    (TREATMENTS, "M0–M5"),
-                ]:
-                    result = fit_rcbd(
-                        sector_frame,
-                        outcome=outcome,
-                        treatments=treatments,
+        return self._show(
+            "harvest_primitive_measurements", data.harvest[primitive_columns]
+        )
+
+    def dry_matter_sensitivity(self) -> pd.DataFrame:
+        policies: tuple[DryMatterPolicy, ...] = ("recorded", "ratio", "exclude")
+        rows: list[dict[str, object]] = []
+        for policy in policies:
+            policy_data = load_experiment_data(
+                self.workbook_path,
+                project_root=self.project_root,
+                dry_matter_policy=policy,
+                include_estimated_quality=False,
+                nni_primary_coefficient=PRIMARY_NNI_COEFFICIENT,
+                nni_primary_exponent=PRIMARY_NNI_EXPONENT,
+                nni_sensitivity_coefficient=SENSITIVITY_NNI_COEFFICIENT,
+                nni_sensitivity_exponent=SENSITIVITY_NNI_EXPONENT,
+            )
+            final_date = max(
+                pd.Timestamp(value)
+                for value in policy_data.longitudinal["date"].cat.categories
+            )
+            final_frame = policy_data.longitudinal.loc[
+                pd.to_datetime(policy_data.longitudinal["date"].astype(str)).eq(
+                    final_date
+                )
+            ]
+            for sector in policy_data.spec.sectors:
+                subset = final_frame.loc[
+                    final_frame["sector"].astype(str).eq(sector)
+                    & final_frame["treatment"]
+                    .astype(str)
+                    .isin(
+                        [
+                            value
+                            for value in policy_data.spec.treatments
+                            if value != "M0"
+                        ]
                     )
-                    estimates = result.means["estimate"].astype(float)
-                    dry_matter_rows.append(
+                ].dropna(subset=["biomass_kg_ha"])
+                fit = smf.ols(
+                    "biomass_kg_ha ~ C(treatment) + C(block)",
+                    data=subset.assign(
+                        treatment=subset["treatment"].astype(str),
+                        block=subset["block"].astype(str),
+                    ),
+                ).fit()
+                anova = sm.stats.anova_lm(fit, typ=2)
+                treatment_row = next(
+                    name for name in anova.index if str(name).startswith("C(treatment)")
+                )
+                treatment_means = subset.groupby("treatment", observed=True)[
+                    "biomass_kg_ha"
+                ].mean()
+                harvest_index = policy_data.harvest.loc[
+                    policy_data.harvest["sector"].astype(str).eq(sector)
+                    & policy_data.harvest["treatment"].astype(str).ne("M0")
+                ].dropna(subset=["harvest_index_pct"])
+                hi_fit = smf.ols(
+                    "harvest_index_pct ~ C(treatment) + C(block)",
+                    data=harvest_index.assign(
+                        treatment=harvest_index["treatment"].astype(str),
+                        block=harvest_index["block"].astype(str),
+                    ),
+                ).fit()
+                hi_anova = sm.stats.anova_lm(hi_fit, typ=2)
+                hi_treatment_row = next(
+                    name
+                    for name in hi_anova.index
+                    if str(name).startswith("C(treatment)")
+                )
+                rows.append(
+                    {
+                        "policy": policy,
+                        "sector": sector,
+                        "final_date": final_date,
+                        "n_biomass": len(subset),
+                        "biomass_timing_p": _as_float(
+                            anova.loc[treatment_row, "PR(>F)"]
+                        ),
+                        "biomass_observed_treatment_mean_min": float(
+                            treatment_means.min()
+                        ),
+                        "biomass_observed_treatment_mean_max": float(
+                            treatment_means.max()
+                        ),
+                        "harvest_index_timing_p": _as_float(
+                            hi_anova.loc[hi_treatment_row, "PR(>F)"]
+                        ),
+                    }
+                )
+        return self._show("dry_matter_sensitivity", pd.DataFrame(rows))
+
+    def _final_rcbd_bundle(self) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        data = self._require_data()
+        outcomes = [
+            ("clean_yield_kg_ha", "primary"),
+            ("dirty_yield_kg_ha", "supporting"),
+            ("panicle_density_m2", "supporting"),
+            ("w1000_g", "supporting"),
+            ("estimated_seeds_per_panicle", "supporting_derived"),
+            ("cleaning_loss_pct", "supporting_derived"),
+            ("harvest_index_pct", "supporting_derived"),
+        ]
+        rows: list[dict[str, object]] = []
+        means: list[pd.DataFrame] = []
+        pairwise: list[pd.DataFrame] = []
+        for sector in data.spec.sectors:
+            for outcome, hierarchy in outcomes:
+                for question in ("timing_m1_m5", "all_m0_m5"):
+                    result = self._fit_rcbd(
+                        data.harvest,
+                        outcome=outcome,
+                        sector=sector,
+                        date=None,
+                        question=question,
+                    )
+                    treatment_row = next(
+                        name
+                        for name in result.anova.index
+                        if str(name).startswith("C(treatment)")
+                    )
+                    rows.append(
                         {
-                            "policy": policy,
-                            "primary_policy": policy == "recorded",
-                            "outcome": outcome,
-                            "label": OUTCOME_LABELS[outcome],
+                            "hierarchy": hierarchy,
                             "sector": sector,
-                            "comparison": comparison,
-                            "n": len(result.frame),
-                            "p_treatment": float(
-                                cast(
-                                    Any,
-                                    result.anova.loc["C(treatment)", "PR(>F)"],
-                                )
+                            "outcome": outcome,
+                            "question": question,
+                            "n": int(result.fit.nobs),
+                            "f_statistic": _as_float(
+                                result.anova.loc[treatment_row, "F"]
                             ),
-                            "adjusted_mean_range": float(
-                                estimates.max() - estimates.min()
-                            ),
+                            "p_raw": result.global_p,
                         }
                     )
-    dry_matter_sensitivity = pd.DataFrame(dry_matter_rows)
-    display_output(dry_matter_sensitivity.round(4))
-    yield "dry_matter_sensitivity"
-
-    # Notebook step: yield_analysis
-    yield_rows = final_rcbd.loc[final_rcbd["outcome"].eq("clean_yield_kg_ha")].copy()
-    display_output(
-        yield_rows[["sector", "comparison", "p_treatment", "cv_pct"]].round(6)
-    )
-
-    for sector in SECTORS:
-        result = final_rcbd_models[("clean_yield_kg_ha", sector, "M0–M5")]
-        display_output(
-            Markdown(f"**{sector}: medias ajustadas y grupos de Tukey, M0–M5**")
+                    means.append(result.marginal_means)
+                    pairwise.append(result.pairwise)
+        summary = pd.DataFrame(rows)
+        summary["family"] = (
+            summary["hierarchy"].astype(str) + "|" + summary["question"].astype(str)
         )
-        display_output(result.means.round(2))
-    yield "yield_analysis"
+        summary["p_fdr"] = np.nan
+        for indices in summary.groupby("family").groups.values():
+            index_list = list(indices)
+            summary.loc[index_list, "p_fdr"] = benjamini_hochberg(
+                summary.loc[index_list, "p_raw"].to_numpy(float)
+            )
+        return (
+            summary,
+            pd.concat(means, ignore_index=True),
+            pd.concat(pairwise, ignore_index=True),
+        )
 
-    # Notebook step: yield_overview
-    def yield_row_limits(
-        frame: pd.DataFrame,
+    def yield_analysis(self) -> pd.DataFrame:
+        summary, means, pairwise = self._final_rcbd_bundle()
+        self.tables["final_outcome_marginal_means"] = means
+        self.tables["final_outcome_pairwise_tukey"] = pairwise
+        return self._show("final_outcome_anova", summary)
+
+    def _yield_overview_model_geometry(
+        self,
+        data: ExperimentData,
         row_specs: Sequence[tuple[Sequence[str], str, str]],
-    ) -> list[tuple[float, float]]:
-        limits: list[tuple[float, float]] = []
-        for treatments, comparison, _ in row_specs:
-            raw_values = frame.loc[
-                frame["treatment"].astype(str).isin(treatments),
+    ) -> tuple[dict[tuple[str, str], RCBDResult], list[tuple[float, float]]]:
+        panel_results: dict[tuple[str, str], RCBDResult] = {}
+        row_limits: list[tuple[float, float]] = []
+        for treatments, question, _ in row_specs:
+            values = data.harvest.loc[
+                data.harvest["treatment"].astype(str).isin(treatments),
                 "clean_yield_kg_ha",
             ].dropna()
-            model_limits: list[float] = []
-            for sector in SECTORS:
-                result = final_rcbd_models[("clean_yield_kg_ha", sector, comparison)]
-                model_limits.extend(result.means["ci_low"].tolist())
-                model_limits.extend(result.means["ci_high"].tolist())
-            lower = min(float(raw_values.min()), min(model_limits))
-            upper = max(float(raw_values.max()), max(model_limits))
+            interval_limits: list[float] = []
+            for sector in data.spec.sectors:
+                result = self._fit_rcbd(
+                    data.harvest,
+                    outcome="clean_yield_kg_ha",
+                    sector=sector,
+                    date=None,
+                    question=question,
+                )
+                panel_results[(sector, question)] = result
+                interval_limits.extend(result.marginal_means["ci_low"].tolist())
+                interval_limits.extend(result.marginal_means["ci_high"].tolist())
+            lower = min(float(values.min()), min(interval_limits))
+            upper = max(float(values.max()), max(interval_limits))
             padding = 0.10 * (upper - lower)
-            limits.append((max(0.0, lower - padding), upper + padding))
-        return limits
+            row_limits.append((max(0.0, lower - padding), upper + padding))
+        return panel_results, row_limits
 
-    def plot_yield_treatment_points(
-        ax: Any,
+    def _plot_yield_overview_panel(
+        self,
+        axis: Any,
         *,
-        positions: np.ndarray,
+        data: ExperimentData,
         treatments: Sequence[str],
-        sector_data: pd.DataFrame,
-        means: pd.DataFrame,
+        question: str,
+        sector: str,
+        result: RCBDResult,
+        row_limit: tuple[float, float],
+        treatment_colors: dict[str, str],
         block_offsets: dict[str, float],
+        show_y_label: bool,
     ) -> None:
+        positions = np.arange(len(treatments), dtype=float)
+        sector_data = data.harvest.loc[
+            data.harvest["sector"].astype(str).eq(sector)
+            & data.harvest["treatment"].astype(str).isin(treatments)
+        ]
+        means = result.marginal_means.set_index("treatment")
         for position, treatment in zip(positions, treatments, strict=True):
             observations = sector_data.loc[
                 sector_data["treatment"].astype(str).eq(treatment)
             ].sort_values("block")
-            point_positions = np.asarray(
+            observed_x = np.asarray(
                 [
                     position + block_offsets[str(block)]
                     for block in observations["block"]
                 ]
             )
-            ax.scatter(
-                point_positions,
+            axis.scatter(
+                observed_x,
                 observations["clean_yield_kg_ha"],
-                color=TREATMENT_COLORS[treatment],
+                color=treatment_colors[treatment],
                 alpha=0.34,
                 s=27,
                 linewidths=0,
                 zorder=2,
             )
             mean_row = cast(Any, means.loc[treatment])
-            is_control = treatment == "M0"
-            ax.errorbar(
+            axis.errorbar(
                 position,
                 mean_row["estimate"],
                 yerr=[
                     [mean_row["estimate"] - mean_row["ci_low"]],
                     [mean_row["ci_high"] - mean_row["estimate"]],
                 ],
-                color=TREATMENT_COLORS[treatment],
+                color=treatment_colors[treatment],
                 marker="o",
-                markerfacecolor="white" if is_control else TREATMENT_COLORS[treatment],
-                markeredgecolor=TREATMENT_COLORS[treatment],
+                markerfacecolor=(
+                    "white" if treatment == "M0" else treatment_colors[treatment]
+                ),
+                markeredgecolor=treatment_colors[treatment],
                 linestyle="none",
                 markersize=MARKER_SIZE,
                 elinewidth=INTERVAL_LINEWIDTH,
                 capsize=ERRORBAR_CAPSIZE,
                 zorder=4,
             )
-
-    def configure_yield_panel(
-        ax: Any,
-        *,
-        positions: np.ndarray,
-        treatments: Sequence[str],
-        comparison: str,
-        sector: str,
-        row_index: int,
-        column_index: int,
-        row_limit: tuple[float, float],
-        result: RCBDResult,
-    ) -> None:
-        global_p = float(cast(Any, result.anova.loc["C(treatment)", "PR(>F)"]))
         p_text = (
-            "< 0,0001" if global_p < 0.0001 else f"= {global_p:.4f}".replace(".", ",")
+            "< 0,0001"
+            if result.global_p < 0.0001
+            else f"= {result.global_p:.4f}".replace(".", ",")
         )
-        ax.text(
+        axis.text(
             0.02,
             1.015,
             f"ANOVA de tratamiento: p {p_text}",
-            transform=ax.transAxes,
+            transform=axis.transAxes,
             ha="left",
             va="bottom",
             fontsize=9.25,
             clip_on=False,
         )
-        ax.set_xticks(positions, treatments)
-        ax.set_ylim(*row_limit)
-        ax.set_xlabel("Tratamiento")
-        if column_index == 0:
-            ax.set_ylabel(OUTCOME_LABELS["clean_yield_kg_ha"])
-        if comparison == "M0–M5":
-            ax.axvline(
+        axis.set_xticks(positions, treatments)
+        axis.set_ylim(*row_limit)
+        axis.set_xlabel("Tratamiento")
+        if show_y_label:
+            axis.set_ylabel("Rendimiento limpio (kg ha⁻¹)")
+        if question == "all_m0_m5":
+            axis.axvline(
                 0.5,
-                color=PLOT_PALETTE[5],
+                color=self.palette[5],
                 linestyle=":",
                 linewidth=REFERENCE_LINEWIDTH,
-                alpha=0.7,
+                alpha=0.70,
             )
 
-    def plot_yield_panel(
-        ax: Any,
-        *,
-        frame: pd.DataFrame,
-        treatments: Sequence[str],
-        comparison: str,
-        sector: str,
-        row_index: int,
-        column_index: int,
-        row_limit: tuple[float, float],
-        block_offsets: dict[str, float],
-    ) -> None:
-        positions = np.arange(len(treatments), dtype=float)
-        result = final_rcbd_models[("clean_yield_kg_ha", sector, comparison)]
-        means = result.means.set_index("treatment")
-        sector_data = frame.loc[
-            frame["sector"].astype(str).eq(sector)
-            & frame["treatment"].astype(str).isin(treatments)
-        ]
-        plot_yield_treatment_points(
-            ax,
-            positions=positions,
-            treatments=treatments,
-            sector_data=sector_data,
-            means=means,
-            block_offsets=block_offsets,
+    def yield_overview(self) -> pd.DataFrame:
+        data = self._require_data()
+        summary = (
+            data.harvest.groupby(["sector", "treatment"], observed=True)[
+                "clean_yield_kg_ha"
+            ]
+            .agg(["count", "mean", "std"])
+            .reset_index()
         )
-        configure_yield_panel(
-            ax,
-            positions=positions,
-            treatments=treatments,
-            comparison=comparison,
-            sector=sector,
-            row_index=row_index,
-            column_index=column_index,
-            row_limit=row_limit,
-            result=result,
+        summary["standard_error"] = summary["std"] / np.sqrt(summary["count"])
+        summary["critical"] = summary["count"].map(
+            lambda value: stats.t.ppf(0.975, value - 1)
         )
+        summary["ci_low"] = (
+            summary["mean"] - summary["critical"] * summary["standard_error"]
+        )
+        summary["ci_high"] = (
+            summary["mean"] + summary["critical"] * summary["standard_error"]
+        )
+        self._show("yield_observed_summary", summary)
 
-    def plot_yield_two_questions(frame: pd.DataFrame) -> None:
-        block_offsets = dict(
-            zip(BLOCKS, np.linspace(-0.12, 0.12, len(BLOCKS)), strict=True)
-        )
         row_specs = [
-            (TREATMENTS, "M0–M5", "Respuesta al N experimental adicional"),
-            (FERTILIZED, "M1–M5", "Comparación entre calendarios"),
-        ]
-        fig, axes = mpl.subplots(2, 2, figsize=(12.2, 8.8))
-        axes_array = np.asarray(axes)
-        row_limits = yield_row_limits(frame, row_specs)
-
-        for row_index, (treatments, comparison, _row_title) in enumerate(row_specs):
-            for column_index, sector in enumerate(SECTORS):
-                plot_yield_panel(
-                    axes_array[row_index, column_index],
-                    frame=frame,
-                    treatments=treatments,
-                    comparison=comparison,
-                    sector=sector,
-                    row_index=row_index,
-                    column_index=column_index,
-                    row_limit=row_limits[row_index],
-                    block_offsets=block_offsets,
-                )
-        add_figure_header(
-            fig,
-            "Rendimiento de semilla limpia: dos preguntas y dos escalas",
-            subtitle=(
-                "Parcelas individuales y media ajustada por bloque ± IC puntual del 95 %; "
-                "n = 4 por tratamiento"
-            ),
-        )
-        add_figure_note(
-            fig,
             (
-                "La fila superior incluye M0; la inferior amplía M1–M5 para evitar que la gran "
-                "respuesta frente a M0 comprima visualmente las diferencias entre calendarios."
+                list(data.spec.treatments),
+                "all_m0_m5",
+                "Respuesta al N experimental adicional",
             ),
+            (
+                [value for value in data.spec.treatments if value != "M0"],
+                "timing_m1_m5",
+                "Comparación entre calendarios",
+            ),
+        ]
+        panel_results, row_limits = self._yield_overview_model_geometry(
+            data,
+            row_specs,
         )
+
+        treatment_colors = dict(
+            zip(
+                data.spec.treatments,
+                self.palette[: len(data.spec.treatments)],
+                strict=True,
+            )
+        )
+        block_offsets = dict(
+            zip(
+                data.spec.blocks,
+                np.linspace(-0.12, 0.12, len(data.spec.blocks)),
+                strict=True,
+            )
+        )
+        fig, axes = plt.subplots(2, len(data.spec.sectors), figsize=(12.2, 8.8))
+        axes_array = np.asarray(axes)
+        for row_index, (treatments, question, _) in enumerate(row_specs):
+            for column_index, sector in enumerate(data.spec.sectors):
+                axis = axes_array[row_index, column_index]
+                result = panel_results[(sector, question)]
+                self._plot_yield_overview_panel(
+                    axis,
+                    data=data,
+                    treatments=treatments,
+                    question=question,
+                    sector=sector,
+                    result=result,
+                    row_limit=row_limits[row_index],
+                    treatment_colors=treatment_colors,
+                    block_offsets=block_offsets,
+                    show_y_label=column_index == 0,
+                )
         fig.subplots_adjust(
             left=0.08,
             right=0.98,
             bottom=0.10,
-            top=0.75,
-            hspace=0.65,
+            top=0.72,
+            hspace=0.70,
             wspace=0.12,
         )
-        for column_index, sector in enumerate(SECTORS):
+        for column_index, sector in enumerate(data.spec.sectors):
             panel_position = axes_array[0, column_index].get_position()
             fig.text(
-                (panel_position.x0 + panel_position.x1) / 2,
+                (panel_position.x0 + panel_position.x1) / 2.0,
                 panel_position.y1 + 0.075,
                 sector.upper(),
                 ha="center",
@@ -2196,1807 +1530,1216 @@ def _analysis_steps(
                 fontsize=11,
                 fontweight="bold",
             )
-        save_figure(fig, "figura_03_rendimiento_dos_preguntas")
-        mpl.show()
-        mpl.close(fig)
-
-    plot_yield_two_questions(data.harvest)
-    yield "yield_overview"
-
-    # Notebook step: yield_contrasts
-    def average_fertilized_minus_control(
-        result: RCBDResult,
-    ) -> dict[str, float]:
-        _, vectors, covariance = adjusted_treatment_means(
-            result.fit,
-            treatments=TREATMENTS,
+        self._save_figure(
+            fig,
+            "figura_03_rendimiento_observado",
+            title="Rendimiento de semilla limpia: dos preguntas y dos escalas",
+            subtitle=(
+                "Parcelas individuales y media ajustada por bloque con IC puntual del 95 %; "
+                "las preguntas M0–M5 y M1–M5 se prueban por separado."
+            ),
+            note=(
+                "La fila superior incluye M0; la inferior amplía M1–M5 para que la gran "
+                "respuesta frente a M0 no comprima las diferencias entre calendarios."
+            ),
         )
-        fertilized_vector = np.mean(
-            np.vstack([vectors[treatment] for treatment in FERTILIZED]),
-            axis=0,
-        )
-        contrast = fertilized_vector - vectors["M0"]
-        estimate = float(contrast @ result.fit.params.to_numpy())
-        se = float(np.sqrt(contrast @ covariance @ contrast))
-        half_width = float(cast(Any, stats.t.ppf(0.975, result.fit.df_resid))) * se
-        return {
-            "difference": estimate,
-            "ci_low": estimate - half_width,
-            "ci_high": estimate + half_width,
-        }
+        return summary
 
-    def build_yield_contrast_table() -> pd.DataFrame:
-        rows: list[dict[str, object]] = []
-        for sector in SECTORS:
-            all_result = final_rcbd_models[("clean_yield_kg_ha", sector, "M0–M5")]
-            aggregate = average_fertilized_minus_control(all_result)
+    def yield_contrasts(self) -> pd.DataFrame:
+        data = self._require_data()
+        rows = [
+            self._planned_extra_n_contrast(
+                data.harvest,
+                outcome="clean_yield_kg_ha",
+                sector=sector,
+                date=None,
+            )
+            for sector in data.spec.sectors
+        ]
+        # Early versus late is a secondary descriptive contrast within M1–M5.
+        for sector in data.spec.sectors:
+            result = self._fit_rcbd(
+                data.harvest,
+                outcome="clean_yield_kg_ha",
+                sector=sector,
+                date=None,
+                question="timing_m1_m5",
+            )
+            treatments = [value for value in data.spec.treatments if value != "M0"]
+            vectors = self._marginal_mean_vectors(
+                result.fit,
+                treatments=treatments,
+                blocks=data.spec.blocks,
+            )
+            vector = 0.5 * (vectors["M1"] + vectors["M2"]) - 0.5 * (
+                vectors["M4"] + vectors["M5"]
+            )
+            estimate, se, low, high, p_value = self._linear_estimate(result.fit, vector)
             rows.append(
                 {
                     "sector": sector,
-                    "contrast": "Promedio M1–M5 − M0",
-                    **aggregate,
-                    "interval_type": "IC t puntual del 95 %",
-                    "aggregate": True,
+                    "date": None,
+                    "outcome": "clean_yield_kg_ha",
+                    "contrast": "mean_M1_M2_minus_mean_M4_M5",
+                    "estimate": estimate,
+                    "standard_error": se,
+                    "ci_low": low,
+                    "ci_high": high,
+                    "p_value": p_value,
                 }
             )
+        contrasts = pd.DataFrame(rows)
+        return self._show("yield_planned_contrasts", contrasts)
 
-            calendar_result = final_rcbd_models[("clean_yield_kg_ha", sector, "M1–M5")]
-            for raw_row in calendar_result.pairwise.itertuples(index=False):
-                row = cast(Any, raw_row)
+    def yield_components(self) -> pd.DataFrame:
+        data = self._require_data()
+        components = [
+            "panicle_density_m2",
+            "w1000_g",
+            "estimated_seeds_per_panicle",
+            "cleaning_loss_pct",
+        ]
+        summary = (
+            data.harvest.groupby(["sector", "treatment"], observed=True)[components]
+            .agg(["count", "mean", "std"])
+            .reset_index()
+        )
+        summary.columns = [
+            (
+                "_".join(str(part) for part in column if str(part))
+                if isinstance(column, tuple)
+                else str(column)
+            )
+            for column in summary.columns
+        ]
+        return self._show("yield_component_summary", summary)
+
+    @staticmethod
+    def _reconstruction_null(
+        harvest: pd.DataFrame,
+        *,
+        permutations: int,
+        seed: int,
+    ) -> pd.DataFrame:
+        rng = np.random.default_rng(seed)
+        rows: list[dict[str, object]] = []
+        patterns: dict[str, Callable[[pd.DataFrame], np.ndarray]] = {
+            "all_m0_m5": lambda frame: np.ones(len(frame), dtype=bool),
+            "timing_m1_m5": lambda frame: frame["treatment"]
+            .astype(str)
+            .ne("M0")
+            .to_numpy(),
+        }
+        for sector in harvest["sector"].astype(str).drop_duplicates():
+            sector_frame = harvest.loc[harvest["sector"].astype(str).eq(sector)].copy()
+            for pattern, selector in patterns.items():
+                subset = sector_frame.loc[selector(sector_frame)].copy()
+                observed = float(
+                    stats.pearsonr(
+                        subset["panicle_density_m2"],
+                        subset["estimated_seeds_per_panicle"],
+                    ).statistic
+                )
+                panicle_count = subset["panicle_count"].to_numpy(float)
+                panicle_density = subset["panicle_density_m2"].to_numpy(float)
+                seed_count = subset["estimated_seed_count"].to_numpy(float)
+                null = np.empty(permutations, dtype=float)
+                for index in range(permutations):
+                    permuted = rng.permutation(seed_count) / panicle_count
+                    null[index] = float(
+                        stats.pearsonr(panicle_density, permuted).statistic
+                    )
+                median = float(np.median(null))
+                tail = float(
+                    (1 + np.sum(np.abs(null - median) >= abs(observed - median)))
+                    / (permutations + 1)
+                )
                 rows.append(
                     {
                         "sector": sector,
-                        "contrast": f"{row.group1} − {row.group2}",
-                        "difference": row.difference,
-                        "ci_low": row.ci_low,
-                        "ci_high": row.ci_high,
-                        "interval_type": "IC simultáneo de Tukey del 95 %",
-                        "aggregate": False,
+                        "pattern": pattern,
+                        "n": len(subset),
+                        "permutations": permutations,
+                        "observed_correlation": observed,
+                        "null_median": median,
+                        "null_lower_95": float(np.quantile(null, 0.025)),
+                        "null_upper_95": float(np.quantile(null, 0.975)),
+                        "observed_percentile_in_null": float(np.mean(null <= observed)),
+                        "two_sided_tail_around_null_median": tail,
                     }
                 )
         return pd.DataFrame(rows)
 
-    yield_contrasts = build_yield_contrast_table()
-    display_output(yield_contrasts.round(2))
+    def component_correlations(self) -> pd.DataFrame:
+        data = self._require_data()
+        null = self._reconstruction_null(
+            data.harvest,
+            permutations=10000,
+            seed=self.random_seed,
+        )
+        self._show("component_reconstruction_null", null)
 
-    def plot_yield_contrast_points(
-        ax: Any,
-        *,
-        sector: str,
-        sector_table: pd.DataFrame,
-        contrast_order: Sequence[str],
-        y_positions: np.ndarray,
-    ) -> None:
-        for position, contrast_label in zip(y_positions, contrast_order, strict=True):
-            row = cast(Any, sector_table.loc[contrast_label])
-            aggregate = bool(row["aggregate"])
-            estimate = float(row["difference"])
+        fig, axis = plt.subplots(figsize=(10.4, 5.2))
+        table = null.iloc[::-1].reset_index(drop=True)
+        y = np.arange(len(table))
+        null_y = y + 0.09
+        observed_y = y - 0.09
+        for index, (_, row) in enumerate(table.iterrows()):
             plot_horizontal_interval(
-                ax,
-                estimate=estimate,
-                lower=float(row["ci_low"]),
-                upper=float(row["ci_high"]),
-                y=float(position),
-                color=SECTOR_COLORS[sector],
-                zorder=3,
+                axis,
+                estimate=float(row["null_median"]),
+                lower=float(row["null_lower_95"]),
+                upper=float(row["null_upper_95"]),
+                y=float(null_y[index]),
+                color=self.palette[1],
+                label=(
+                    "Nulo de reconstrucción: mediana e IC 95 %" if index == 0 else None
+                ),
             )
-            if aggregate:
-                ax.annotate(
-                    f"{estimate:.0f}",
-                    (estimate, position),
-                    xytext=(8, 0),
-                    textcoords="offset points",
-                    va="center",
-                    fontsize=9,
-                )
-
-    def configure_yield_contrast_axis(
-        ax: Any,
-        *,
-        sector: str,
-        panel_index: int,
-        contrast_order: Sequence[str],
-        y_positions: np.ndarray,
-        x_limits: tuple[float, float],
-    ) -> None:
-        ax.axvline(
-            0,
-            color=PLOT_PALETTE[5],
-            linestyle="--",
-            linewidth=REFERENCE_LINEWIDTH,
+        axis.scatter(
+            table["observed_correlation"],
+            observed_y,
+            marker="o",
+            s=62,
+            facecolors="white",
+            edgecolors="0.20",
+            linewidths=1.8,
+            zorder=4,
+            label="Correlación observada",
         )
-        ax.axhline(
-            0.5,
-            color=mpl.rcParams["axes.edgecolor"],
-            linewidth=REFERENCE_LINEWIDTH,
-            alpha=0.65,
+        axis.axvline(0.0, linewidth=REFERENCE_LINEWIDTH)
+        axis.set_yticks(
+            y,
+            table["sector"].astype(str)
+            + " — "
+            + table["pattern"].map({"all_m0_m5": "M0–M5", "timing_m1_m5": "M1–M5"}),
         )
-        global_p = float(
-            cast(
-                Any,
-                final_rcbd_models[("clean_yield_kg_ha", sector, "M1–M5")].anova.loc[
-                    "C(treatment)", "PR(>F)"
-                ],
-            )
-        )
-        ax.set_title(
-            f"{sector.upper()} — ANOVA M1–M5 p = {global_p:.4f}".replace(".", ",")
-        )
-        ax.set_xlim(*x_limits)
-        ax.set_xlabel("Diferencia de rendimiento (kg ha⁻¹)")
-        ax.set_yticks(y_positions, contrast_order)
-        ax.tick_params(axis="y", labelleft=panel_index == 0)
-        if panel_index == 0:
-            ax.invert_yaxis()
-
-    def plot_yield_contrasts() -> None:
-        contrast_order = [
-            "Promedio M1–M5 − M0",
-            *[f"{first} − {second}" for first, second in combinations(FERTILIZED, 2)],
-        ]
-        y_positions = np.arange(len(contrast_order), dtype=float)
-        all_limits = yield_contrasts[["ci_low", "ci_high"]].to_numpy(dtype=float)
-        lower = min(0.0, float(np.nanmin(all_limits)))
-        upper = max(0.0, float(np.nanmax(all_limits)))
-        padding = 0.08 * (upper - lower)
-        x_limits = (lower - padding, upper + padding)
-
-        fig, axes = mpl.subplots(1, 2, figsize=(12.2, 7.3), sharex=True, sharey=True)
-        axes_array = np.asarray(axes).ravel()
-        for panel_index, sector in enumerate(SECTORS):
-            ax = axes_array[panel_index]
-            sector_table = yield_contrasts.loc[
-                yield_contrasts["sector"].eq(sector)
-            ].set_index("contrast")
-            plot_yield_contrast_points(
-                ax,
-                sector=sector,
-                sector_table=sector_table,
-                contrast_order=contrast_order,
-                y_positions=y_positions,
-            )
-            configure_yield_contrast_axis(
-                ax,
-                sector=sector,
-                panel_index=panel_index,
-                contrast_order=contrast_order,
-                y_positions=y_positions,
-                x_limits=x_limits,
-            )
-
-        add_figure_header(
+        axis.set_xlabel("Correlación panojas–semillas estimadas por panoja")
+        axis.grid(axis="x", alpha=0.22)
+        axis.legend(loc="lower right", bbox_to_anchor=(1.0, 1.02), ncol=2)
+        fig.subplots_adjust(left=0.30, right=0.98, bottom=0.17, top=0.72)
+        self._save_figure(
             fig,
-            "Contrastes de rendimiento: respuesta marginal e incertidumbre",
-            subtitle=(
-                "Promedio M1–M5 menos M0: IC t del 95 %. "
-                "Diferencias M1–M5: IC simultáneos de Tukey del 95 %."
-            ),
+            "figura_componentes_nulo_reconstruccion",
+            title="Correlación observada frente al nulo de reconstrucción",
+            subtitle="El numerador estimado se permuta y la división por panojas se vuelve a calcular.",
+            note="El procedimiento evalúa información adicional a la identidad matemática; no descarta mecanismos biológicos no medidos.",
         )
-        add_figure_note(
-            fig,
-            (
-                "Los contrastes frente a M0 estiman la respuesta a N experimental adicional; "
-                "los intervalos que cruzan cero no demuestran equivalencia agronómica."
-            ),
+        return null
+
+    def seed_weight_precision(self) -> pd.DataFrame:
+        data = self._require_data()
+        wide = data.harvest[
+            [
+                "sample_id",
+                "sector",
+                "block",
+                "treatment",
+                "w100_1_g",
+                "w100_2_g",
+                "w100_3_g",
+            ]
+        ].copy()
+        values = wide[["w100_1_g", "w100_2_g", "w100_3_g"]]
+        wide["technical_mean_g"] = values.mean(axis=1)
+        wide["technical_sd_g"] = values.std(axis=1, ddof=1)
+        wide["technical_cv_pct"] = (
+            100.0 * wide["technical_sd_g"] / wide["technical_mean_g"]
         )
-        fig.subplots_adjust(
-            left=0.20,
-            right=0.98,
-            bottom=0.12,
-            top=0.82,
-            wspace=0.10,
+        summary = pd.DataFrame(
+            [
+                {
+                    "n_samples": len(wide),
+                    "median_cv_pct": float(wide["technical_cv_pct"].median()),
+                    "cv_upper_95_pct": float(wide["technical_cv_pct"].quantile(0.95)),
+                    "max_cv_pct": float(wide["technical_cv_pct"].max()),
+                    "max_abs_w1000_recompute_difference_g": float(
+                        (data.harvest["w1000_g"] - data.harvest["w1000_workbook_g"])
+                        .abs()
+                        .max()
+                    ),
+                }
+            ]
         )
-        save_figure(fig, "anexo_contrastes_rendimiento")
-        mpl.show()
-        mpl.close(fig)
+        self.tables["seed_weight_technical_precision_by_sample"] = wide
+        return self._show("seed_weight_technical_precision_summary", summary)
 
-    plot_yield_contrasts()
-    yield "yield_contrasts"
+    # ------------------------------------------------------------------
+    # Diagnostics, missingness, correlations
+    # ------------------------------------------------------------------
 
-    # Notebook step: yield_components
-    COMPONENT_OUTCOMES = [
-        "panicle_density_m2",
-        "estimated_seeds_per_panicle",
-        "w1000_g",
-    ]
-
-    def plot_harvest_component_points(
-        ax: Any,
-        *,
-        raw: pd.DataFrame,
-        means: pd.DataFrame,
-        outcome: str,
-        treatment_positions: np.ndarray,
-        block_offsets: dict[str, float],
-    ) -> None:
-        for position, treatment in zip(treatment_positions, FERTILIZED, strict=True):
-            observations = raw.loc[
-                raw["treatment"].astype(str).eq(treatment)
-            ].sort_values("block")
-            point_positions = np.asarray(
-                [
-                    position + block_offsets[str(block)]
-                    for block in observations["block"]
-                ]
-            )
-            ax.scatter(
-                point_positions,
-                observations[outcome],
-                color=TREATMENT_COLORS[treatment],
-                alpha=0.32,
-                s=25,
-                linewidths=0,
-                zorder=2,
-            )
-            mean_row = cast(Any, means.loc[treatment])
-            ax.errorbar(
-                position,
-                float(mean_row["estimate"]),
-                yerr=[
-                    [float(mean_row["estimate"] - mean_row["ci_low"])],
-                    [float(mean_row["ci_high"] - mean_row["estimate"])],
-                ],
-                color=TREATMENT_COLORS[treatment],
-                marker=TREATMENT_MARKERS[treatment],
-                markersize=MARKER_SIZE,
-                linestyle="none",
-                elinewidth=INTERVAL_LINEWIDTH,
-                capsize=ERRORBAR_CAPSIZE,
-                zorder=4,
-            )
-
-    def configure_harvest_component_axis(
-        ax: Any,
-        *,
+    def _diagnostic_row(
+        self,
         result: RCBDResult,
-        outcome: str,
-        sector: str,
-        row_index: int,
-        column_index: int,
-        treatment_positions: np.ndarray,
-    ) -> None:
-        global_p = float(cast(Any, result.anova.loc["C(treatment)", "PR(>F)"]))
-        p_text = (
-            "< 0,0001" if global_p < 0.0001 else f"= {global_p:.4f}".replace(".", ",")
-        )
-        ax.text(
-            0.02,
-            1.015,
-            f"ANOVA de tratamiento: p {p_text}",
-            transform=ax.transAxes,
-            ha="left",
-            va="bottom",
-            fontsize=9.25,
-            clip_on=False,
-        )
-        if row_index == 0:
-            ax.set_title(sector.upper(), pad=30)
-        if column_index == 0:
-            ax.set_ylabel(OUTCOME_LABELS[outcome])
-        if row_index == len(COMPONENT_OUTCOMES) - 1:
-            ax.set_xticks(treatment_positions, FERTILIZED)
-            ax.set_xlabel("Calendario")
-        else:
-            ax.tick_params(axis="x", labelbottom=False)
-
-    def plot_harvest_component_panel(
-        ax: Any,
-        *,
-        outcome: str,
-        sector: str,
-        row_index: int,
-        column_index: int,
-        treatment_positions: np.ndarray,
-        block_offsets: dict[str, float],
-    ) -> None:
-        raw = data.harvest.loc[
-            data.harvest["sector"].astype(str).eq(sector)
-            & data.harvest["treatment"].astype(str).isin(FERTILIZED)
-        ]
-        result = final_rcbd_models[(outcome, sector, "M1–M5")]
-        means = result.means.set_index("treatment")
-        plot_harvest_component_points(
-            ax,
-            raw=raw,
-            means=means,
-            outcome=outcome,
-            treatment_positions=treatment_positions,
-            block_offsets=block_offsets,
-        )
-        configure_harvest_component_axis(
-            ax,
-            result=result,
-            outcome=outcome,
-            sector=sector,
-            row_index=row_index,
-            column_index=column_index,
-            treatment_positions=treatment_positions,
-        )
-
-    def plot_harvest_component_panels() -> None:
-        treatment_positions = np.arange(len(FERTILIZED), dtype=float)
-        block_offsets = dict(
-            zip(BLOCKS, np.linspace(-0.12, 0.12, len(BLOCKS)), strict=True)
-        )
-        fig, axes = mpl.subplots(
-            len(COMPONENT_OUTCOMES),
-            len(SECTORS),
-            figsize=(12.2, 10.0),
-            sharex=True,
-            squeeze=False,
-        )
-        axes_array = np.asarray(axes)
-        for row_index, outcome in enumerate(COMPONENT_OUTCOMES):
-            for column_index, sector in enumerate(SECTORS):
-                plot_harvest_component_panel(
-                    axes_array[row_index, column_index],
-                    outcome=outcome,
-                    sector=sector,
-                    row_index=row_index,
-                    column_index=column_index,
-                    treatment_positions=treatment_positions,
-                    block_offsets=block_offsets,
-                )
-
-        add_figure_header(
-            fig,
-            "Componentes del rendimiento entre M1–M5",
-            subtitle=(
-                "Parcelas individuales y medias ajustadas por bloque ± IC puntual "
-                "del 95 %; n = 4 por calendario."
-            ),
-        )
-        add_figure_note(
-            fig,
-            (
-                "Semillas por panoja se estimó a partir del rendimiento limpio, el peso "
-                "de mil semillas y la cantidad de panojas; no es una medición independiente."
-            ),
-        )
-        fig.subplots_adjust(
-            left=0.10,
-            right=0.98,
-            bottom=0.10,
-            top=0.84,
-            hspace=0.31,
-            wspace=0.14,
-        )
-        save_figure(fig, "figura_06_componentes_del_rendimiento")
-        mpl.show()
-        mpl.close(fig)
-
-    plot_harvest_component_panels()
-    yield "yield_components"
-
-    # Notebook step: component_correlations
-    component_means = (
-        data.harvest.loc[data.harvest["treatment"].astype(str).isin(FERTILIZED)]
-        .groupby(["sector", "treatment"], observed=True)[
-            ["panicle_density_m2", "estimated_seeds_per_panicle"]
-        ]
-        .mean()
-        .reset_index()
-    )
-
-    fig, ax = mpl.subplots(figsize=(8.5, 5.8))
-    for sector in SECTORS:
-        subset = component_means.loc[component_means["sector"].astype(str).eq(sector)]
-        ax.scatter(
-            subset["panicle_density_m2"],
-            subset["estimated_seeds_per_panicle"],
-            color=SECTOR_COLORS[sector],
-            marker=SECTOR_MARKERS[sector],
-            s=70,
-            label=sector,
-        )
-        for raw_row in subset.itertuples(index=False):
-            row = cast(Any, raw_row)
-            ax.annotate(
-                str(row.treatment),
-                (row.panicle_density_m2, row.estimated_seeds_per_panicle),
-                xytext=(5, 5),
-                textcoords="offset points",
-            )
-    ax.set_xlabel("Densidad media de panojas (m⁻²)")
-    ax.set_ylabel("Semillas estimadas por panoja")
-    ax.legend(title="Sector")
-    add_figure_header(fig, "Componentes reconstruidos entre M1–M5")
-    add_figure_note(
-        fig,
-        "Cada punto representa la media de cuatro parcelas para un calendario.",
-    )
-    fig.subplots_adjust(left=0.10, right=0.98, bottom=0.16, top=0.85)
-    mpl.show()
-    mpl.close(fig)
-    yield "component_correlations"
-
-    # Notebook step: seed_weight_precision
-    seed_repeatability = data.harvest[
-        [
-            "sample_id",
-            "sector",
-            "block",
-            "treatment",
-            "w100_1_g",
-            "w100_2_g",
-            "w100_3_g",
-        ]
-    ].copy()
-    weights = seed_repeatability[["w100_1_g", "w100_2_g", "w100_3_g"]]
-    seed_repeatability["technical_cv_pct"] = (
-        100.0 * weights.std(axis=1, ddof=1) / weights.mean(axis=1)
-    )
-    display_output(
-        seed_repeatability["technical_cv_pct"].describe().to_frame().T.round(3)
-    )
-
-    repeatability_plot = seed_repeatability.assign(
-        plot_y=np.random.default_rng(RANDOM_SEED).uniform(
-            -0.18,
-            0.18,
-            size=len(seed_repeatability),
-        )
-    )
-    fig, ax = mpl.subplots(figsize=(10.5, 3.8))
-    sns_api.scatterplot(
-        data=repeatability_plot,
-        x="technical_cv_pct",
-        y="plot_y",
-        color=PLOT_PALETTE[0],
-        alpha=0.68,
-        s=42,
-        linewidth=0,
-        ax=ax,
-    )
-    median_cv = float(cast(Any, seed_repeatability["technical_cv_pct"].median()))
-    ax.axvline(
-        median_cv,
-        color=PLOT_PALETTE[3],
-        linestyle="--",
-        linewidth=REFERENCE_LINEWIDTH,
-    )
-    ax.text(
-        median_cv,
-        0.92,
-        f"Mediana = {median_cv:.2f} %".replace(".", ","),
-        transform=ax.get_xaxis_transform(),
-        ha="center",
-        va="top",
-        fontsize=9.5,
-        color=PLOT_PALETTE[3],
-    )
-    ax.set_xlabel("CV entre las tres submuestras de 100 semillas (%)")
-    ax.set_ylabel("")
-    ax.set_yticks([])
-    ax.set_ylim(-0.45, 0.45)
-    ax.grid(axis="x", alpha=0.25)
-    add_figure_header(
-        fig,
-        "Repetibilidad técnica del peso de 100 semillas",
-        subtitle=(
-            f"Cada círculo representa una parcela; n = {len(seed_repeatability)} parcelas."
-        ),
-    )
-    add_figure_note(
-        fig,
-        "El CV resume la variación entre tres submuestras técnicas de la misma parcela.",
-    )
-    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.24, top=0.64)
-    mpl.show()
-    mpl.close(fig)
-    yield "seed_weight_precision"
-
-    # Notebook step: model_diagnostics
-    def diagnostic_row(
-        result: RCBDResult,
-        *,
-        sector: str,
-        date: pd.Timestamp | None,
-        comparison: str,
     ) -> dict[str, object]:
-        residuals = np.asarray(result.fit.resid)
-        shapiro_p = stats.shapiro(residuals).pvalue if len(residuals) >= 3 else np.nan
+        residuals = np.asarray(result.fit.resid, dtype=float)
+        shapiro_p = (
+            float(stats.shapiro(residuals).pvalue) if len(residuals) >= 3 else np.nan
+        )
+        frame = result.fit.model.data.frame.copy()
         groups = [
-            group[result.outcome].dropna().to_numpy()
-            for _, group in result.frame.groupby("treatment", observed=True)
+            group[result.outcome].to_numpy(float)
+            for _, group in frame.groupby("treatment", observed=True)
+            if len(group) >= 2
         ]
         levene_p = (
-            stats.levene(*groups, center="median").pvalue
-            if all(len(group) >= 2 for group in groups)
+            float(stats.levene(*groups, center="median").pvalue)
+            if len(groups) >= 2
             else np.nan
         )
         influence = result.fit.get_influence()
-        studentized = influence.resid_studentized_external
-        cooks = influence.cooks_distance[0]
-        response = result.frame[result.outcome]
-        q1, q3 = response.quantile([0.25, 0.75])
-        iqr = q3 - q1
-        iqr_flag_count = int(
-            ((response < q1 - 1.5 * iqr) | (response > q3 + 1.5 * iqr)).sum()
-        )
+        cooks = np.asarray(influence.cooks_distance[0], dtype=float)
         return {
+            "sector": result.sector,
+            "date": result.date,
             "outcome": result.outcome,
-            "label": OUTCOME_LABELS.get(result.outcome, result.outcome),
-            "sector": sector,
-            "date": date,
-            "comparison": comparison,
-            "n": len(result.frame),
+            "question": result.question,
+            "n": int(result.fit.nobs),
             "shapiro_p": shapiro_p,
             "levene_median_p": levene_p,
-            "max_abs_studentized": float(np.nanmax(np.abs(studentized))),
-            "max_cooks_d": float(np.nanmax(cooks)),
-            "cooks_4_over_n_count": int(np.sum(cooks > 4.0 / len(result.frame))),
-            "iqr_flag_count": iqr_flag_count,
+            "max_cooks_distance": float(cooks.max()),
+            "count_cooks_gt_4_over_n": int(np.sum(cooks > 4.0 / len(cooks))),
         }
 
-    diagnostic_rows: list[dict[str, object]] = []
-    for (outcome, date, sector, comparison), result in longitudinal_rcbd_models.items():
-        if comparison == "M1–M5":
-            diagnostic_rows.append(
-                diagnostic_row(
-                    result,
-                    sector=sector,
-                    date=date,
-                    comparison=comparison,
-                )
-            )
-    for (outcome, sector, comparison), result in final_rcbd_models.items():
-        if comparison == "M1–M5" and outcome in FINAL_OUTCOMES:
-            diagnostic_rows.append(
-                diagnostic_row(
-                    result,
-                    sector=sector,
-                    date=None,
-                    comparison=comparison,
-                )
-            )
+    def model_diagnostics(self) -> pd.DataFrame:
+        if not self.rcbd_results:
+            self.longitudinal_anova()
+            self.yield_analysis()
+        rows = [self._diagnostic_row(result) for result in self.rcbd_results.values()]
+        return self._show("rcbd_diagnostics", pd.DataFrame(rows))
 
-    diagnostics = pd.DataFrame(diagnostic_rows)
-    diagnostics["potential_flag"] = (
-        diagnostics["shapiro_p"].lt(ALPHA)
-        | diagnostics["levene_median_p"].lt(ALPHA)
-        | diagnostics["max_abs_studentized"].gt(3.0)
-        | diagnostics["cooks_4_over_n_count"].gt(0)
-        | diagnostics["iqr_flag_count"].gt(0)
-    )
-
-    display_output(
-        diagnostics.loc[diagnostics["potential_flag"]]
-        .sort_values(["label", "sector", "date"])
-        .round(4)
-    )
-    yield "model_diagnostics"
-
-    # Notebook step: primary_residual_diagnostics
-    def residual_diagnostic_plots(result: RCBDResult, *, title_prefix: str) -> None:
-        fitted = np.asarray(result.fit.fittedvalues)
-        residuals = np.asarray(result.fit.resid)
-
-        fig, axes = mpl.subplots(1, 2, figsize=(10.8, 4.6))
-        residual_ax, qq_ax = np.asarray(axes).ravel()
-        sns_api.scatterplot(
-            x=fitted,
-            y=residuals,
-            ax=residual_ax,
-            color=PLOT_PALETTE[0],
-            alpha=0.8,
-        )
-        residual_ax.axhline(
-            0,
-            color=PLOT_PALETTE[5],
-            linestyle="--",
-            linewidth=REFERENCE_LINEWIDTH,
-        )
-        residual_ax.set_xlabel("Valores ajustados")
-        residual_ax.set_ylabel("Residuos")
-        residual_ax.set_title("Residuos frente a valores ajustados")
-
-        (theoretical_quantiles, ordered_residuals), (slope, intercept, _) = (
-            stats.probplot(residuals, dist="norm")
-        )
-        sns_api.scatterplot(
-            x=theoretical_quantiles,
-            y=ordered_residuals,
-            ax=qq_ax,
-            color=PLOT_PALETTE[0],
-        )
-        sns_api.lineplot(
-            x=theoretical_quantiles,
-            y=slope * theoretical_quantiles + intercept,
-            ax=qq_ax,
-            color=PLOT_PALETTE[5],
-            estimator=None,
-            sort=False,
-        )
-        qq_ax.set_xlabel("Cuantiles teóricos")
-        qq_ax.set_ylabel("Residuos ordenados")
-        qq_ax.set_title("Gráfico Q–Q normal")
-        add_figure_header(fig, title_prefix)
-        fig.subplots_adjust(left=0.08, right=0.98, bottom=0.14, top=0.78, wspace=0.28)
-        mpl.show()
-        mpl.close(fig)
-
-    for sector in SECTORS:
-        residual_diagnostic_plots(
-            final_rcbd_models[("clean_yield_kg_ha", sector, "M1–M5")],
-            title_prefix=f"Diagnóstico del rendimiento limpio — {sector}, M1–M5",
-        )
-    yield "primary_residual_diagnostics"
-
-    # Notebook step: missing_n_sensitivity
-    sep_secano = data.longitudinal.loc[
-        data.longitudinal["date"].astype("datetime64[ns]").eq(DATES[0])
-        & data.longitudinal["sector"].astype(str).eq("Secano")
-    ].copy()
-
-    imputed_values = {
-        "n_pct": rcbd_missing_cell_estimate(
-            sep_secano,
-            value_column="n_pct",
-            missing_treatment="M1",
-            missing_block="R4",
-            r_blocks=4,
-            t_treatments=6,
-        ),
-        "adf_pct": rcbd_missing_cell_estimate(
-            sep_secano,
-            value_column="adf_pct",
-            missing_treatment="M1",
-            missing_block="R4",
-            r_blocks=4,
-            t_treatments=6,
-        ),
-        "ndf_pct": rcbd_missing_cell_estimate(
-            sep_secano,
-            value_column="ndf_pct",
-            missing_treatment="M1",
-            missing_block="R4",
-            r_blocks=4,
-            t_treatments=6,
-        ),
-    }
-    display_output(pd.Series(imputed_values, name="imputación DBCA").to_frame())
-
-    imputed_sep = sep_secano.copy()
-    missing_mask = imputed_sep["treatment"].astype(str).eq("M1") & imputed_sep[
-        "block"
-    ].astype(str).eq("R4")
-    imputed_sep.loc[missing_mask, "n_pct"] = imputed_values["n_pct"]
-    imputed_sep.loc[missing_mask, "adf_pct"] = imputed_values["adf_pct"]
-    imputed_sep.loc[missing_mask, "ndf_pct"] = imputed_values["ndf_pct"]
-    imputed_sep.loc[missing_mask, "q_kg_n_ha"] = (
-        imputed_sep.loc[missing_mask, "biomass_kg_ha_used"]
-        * imputed_sep.loc[missing_mask, "n_pct"]
-        / 100.0
-    )
-    biomass_t = imputed_sep.loc[missing_mask, "biomass_kg_ha_used"] / 1000.0
-    imputed_sep.loc[missing_mask, "nni_revised"] = imputed_sep.loc[
-        missing_mask, "n_pct"
-    ] / (3.93 * biomass_t.pow(-0.42))
-
-    sensitivity_rows: list[dict[str, object]] = []
-    for outcome in ["n_pct", "q_kg_n_ha", "nni_revised"]:
-        for frame_name, frame in [("observado", sep_secano), ("imputado", imputed_sep)]:
-            result = fit_rcbd(frame, outcome=outcome, treatments=FERTILIZED)
-            sensitivity_rows.append(
-                {
-                    "outcome": OUTCOME_LABELS[outcome],
-                    "scenario": frame_name,
-                    "p_M1_M5": result.anova.loc["C(treatment)", "PR(>F)"],
-                }
-            )
-    display_output(pd.DataFrame(sensitivity_rows).round(6))
-    yield "missing_n_sensitivity"
-
-    # Notebook step: joint_sector_analysis
-    def fit_joint_sector_model(
-        frame: pd.DataFrame,
-        *,
-        outcome: str,
-        treatments: Sequence[str] = FERTILIZED,
-    ) -> tuple[Any, pd.DataFrame, pd.DataFrame]:
-        subset = (
-            frame.loc[frame["treatment"].astype(str).isin(treatments)]
-            .dropna(subset=[outcome])
-            .copy()
-        )
-        subset["treatment"] = categorical(subset["treatment"], treatments)
-        subset["sector"] = categorical(subset["sector"], SECTORS)
-        subset["block"] = categorical(subset["block"], BLOCKS)
-        fit = smf_api.ols(
-            f"{outcome} ~ C(treatment) * C(sector) + C(sector):C(block)",
-            data=subset,
-        ).fit()
-        anova = sm_api.stats.anova_lm(fit, typ=2)
-        return fit, anova, subset
-
-    joint_rows: list[dict[str, object]] = []
-    for outcome in LONGITUDINAL_OUTCOMES:
-        for date in DATES:
-            frame = data.longitudinal.loc[
-                data.longitudinal["date"].astype("datetime64[ns]").eq(date)
-            ].copy()
-            _fit, anova, subset = fit_joint_sector_model(frame, outcome=outcome)
-            joint_rows.append(
-                {
-                    "outcome": outcome,
-                    "label": OUTCOME_LABELS[outcome],
-                    "date": date,
-                    "n": len(subset),
-                    "p_treatment": anova.loc["C(treatment)", "PR(>F)"],
-                    "p_sector": anova.loc["C(sector)", "PR(>F)"],
-                    "p_treatment_x_sector": anova.loc[
-                        "C(treatment):C(sector)", "PR(>F)"
-                    ],
-                }
-            )
-
-    for outcome in FINAL_OUTCOMES:
-        _fit, anova, subset = fit_joint_sector_model(data.harvest, outcome=outcome)
-        joint_rows.append(
-            {
-                "outcome": outcome,
-                "label": OUTCOME_LABELS[outcome],
-                "date": pd.NaT,
-                "n": len(subset),
-                "p_treatment": anova.loc["C(treatment)", "PR(>F)"],
-                "p_sector": anova.loc["C(sector)", "PR(>F)"],
-                "p_treatment_x_sector": anova.loc["C(treatment):C(sector)", "PR(>F)"],
-            }
-        )
-
-    joint_results = pd.DataFrame(joint_rows)
-    joint_results["date_label"] = joint_results["date"].map(DATE_LABELS)
-    display_output(
-        joint_results[
-            [
-                "label",
-                "date_label",
-                "n",
-                "p_treatment",
-                "p_treatment_x_sector",
-                "p_sector",
-            ]
-        ].round(4)
-    )
-
-    yield "joint_sector_analysis"
-
-    # Notebook step: correlation_audit
-    final_nutrition = data.longitudinal.loc[
-        data.longitudinal["date"].astype("datetime64[ns]").eq(DATES[-1]),
-        [
-            "plot_id",
-            "biomass_kg_ha_used",
-            "n_pct",
-            "q_kg_n_ha",
-            "nni_revised",
-        ],
-    ]
-    final_merged = data.harvest.merge(
-        final_nutrition,
-        on="plot_id",
-        how="left",
-        validate="one_to_one",
-        suffixes=("", "_nutrition"),
-    )
-
-    CORRELATION_VARIABLES = [
-        "panicle_density_m2",
-        "estimated_seeds_per_panicle",
-        "w1000_g",
-        "biomass_kg_ha_used_nutrition",
-        "n_pct",
-        "q_kg_n_ha",
-        "harvest_index_pct",
-        "cleaning_loss_pct",
-    ]
-    CORRELATION_LABELS = {
-        "panicle_density_m2": "Panojas m⁻²",
-        "estimated_seeds_per_panicle": "Semillas estimadas por panoja*",
-        "w1000_g": "Peso de mil semillas",
-        "biomass_kg_ha_used_nutrition": "Biomasa final",
-        "n_pct": "Concentración de N",
-        "q_kg_n_ha": "N presente en biomasa aérea",
-        "harvest_index_pct": "Índice de cosecha*",
-        "cleaning_loss_pct": "Merma de limpieza*",
-    }
-
-    def pearson_row(frame: pd.DataFrame, x: str, y: str) -> tuple[float, float, int]:
-        subset = frame[[x, y]].dropna()
-        result = cast(Any, stats.pearsonr(subset[x], subset[y]))
-        return float(result.statistic), float(result.pvalue), len(subset)
-
-    raw_correlation_rows: list[dict[str, object]] = []
-    for variable in CORRELATION_VARIABLES:
-        for sector in ["Conjunto", *SECTORS]:
-            frame = (
-                final_merged
-                if sector == "Conjunto"
-                else final_merged.loc[final_merged["sector"].astype(str).eq(sector)]
-            )
-            r, p, n = pearson_row(frame, variable, "clean_yield_kg_ha")
-            raw_correlation_rows.append(
-                {
-                    "variable": CORRELATION_LABELS[variable],
-                    "sector": sector,
-                    "r": r,
-                    "p": p,
-                    "n": n,
-                    "mathematically_coupled_to_yield": variable
-                    in {
-                        "estimated_seeds_per_panicle",
-                        "harvest_index_pct",
-                        "cleaning_loss_pct",
-                    },
-                    "inference_tier": "exploratoria",
-                }
-            )
-    raw_correlations = pd.DataFrame(raw_correlation_rows)
-    raw_correlations = add_bh_within_families(
-        raw_correlations,
-        p_column="p",
-        family_columns=["sector"],
-    )
-    display_output(
-        raw_correlations.pivot(index="variable", columns="sector", values="r").round(3)
-    )
-
-    def residualized_correlation(
-        frame: pd.DataFrame, variable: str
-    ) -> tuple[float, float, int]:
-        subset = frame.dropna(subset=[variable, "clean_yield_kg_ha"]).copy()
-        subset["treatment"] = categorical(subset["treatment"], TREATMENTS)
-        subset["block"] = categorical(subset["block"], BLOCKS)
-        x_fit = smf_api.ols(f"{variable} ~ C(treatment) + C(block)", data=subset).fit()
-        y_fit = smf_api.ols(
-            "clean_yield_kg_ha ~ C(treatment) + C(block)", data=subset
-        ).fit()
-        result = cast(Any, stats.pearsonr(x_fit.resid, y_fit.resid))
-        return float(result.statistic), float(result.pvalue), len(subset)
-
-    audit_correlation_rows: list[dict[str, object]] = []
-    for variable in [
-        "biomass_kg_ha_used_nutrition",
-        "n_pct",
-        "q_kg_n_ha",
-    ]:
-        for sector in SECTORS:
-            sector_frame = final_merged.loc[
-                final_merged["sector"].astype(str).eq(sector)
-            ].copy()
-            all_r, all_p, _all_n = pearson_row(
-                sector_frame, variable, "clean_yield_kg_ha"
-            )
-            fertilized_frame = sector_frame.loc[
-                sector_frame["treatment"].astype(str).isin(FERTILIZED)
-            ]
-            fert_r, fert_p, _fert_n = pearson_row(
-                fertilized_frame, variable, "clean_yield_kg_ha"
-            )
-            adjusted_r, adjusted_p, _adjusted_n = residualized_correlation(
-                sector_frame, variable
-            )
-            audit_correlation_rows.append(
-                {
-                    "variable": CORRELATION_LABELS[variable],
-                    "sector": sector,
-                    "raw_r": all_r,
-                    "raw_p": all_p,
-                    "M1_M5_r": fert_r,
-                    "M1_M5_p": fert_p,
-                    "adjusted_r": adjusted_r,
-                    "adjusted_p": adjusted_p,
-                }
-            )
-    correlation_audit = pd.DataFrame(audit_correlation_rows)
-    correlation_audit["adjusted_p_bh"] = benjamini_hochberg(
-        correlation_audit["adjusted_p"].astype(float).to_numpy()
-    )
-    correlation_audit["inference_tier"] = "exploratoria"
-    display_output(correlation_audit.round(4))
-    yield "correlation_audit"
-
-    # Notebook step: mixed_models
-    @dataclass
-    class MixedTrajectoryResult:
-        outcome: str
-        sector: str
-        treatments: tuple[str, ...]
-        frame: pd.DataFrame
-        center: float
-        scale: float
-        base_fit: Any
-        additive_fit: Any
-        full_fit: Any
-        summary: dict[str, object]
-
-    def fit_longitudinal_mixed(
-        frame: pd.DataFrame,
-        *,
-        outcome: str,
-        sector: str,
-        treatments: Sequence[str],
-        response_scale: Literal["original", "log"] = "original",
-    ) -> MixedTrajectoryResult:
-        subset = (
-            frame.loc[
-                frame["sector"].astype(str).eq(sector)
-                & frame["treatment"].astype(str).isin(treatments)
-            ]
-            .dropna(subset=[outcome])
-            .copy()
-        )
-        response = subset[outcome].astype(float)
-        if response_scale == "log":
-            if bool((response <= 0).any()):
-                raise ValueError(f"{outcome} contiene valores no positivos.")
-            response = np.log(response)
-        center = float(response.mean())
-        scale = float(response.std(ddof=0))
-        subset["y_z"] = (response - center) / scale
-        subset["treatment"] = categorical(subset["treatment"], treatments)
-        subset["block"] = categorical(subset["block"], BLOCKS)
-        subset["date_label"] = categorical(
-            subset["date_label"], [DATE_LABELS[date] for date in DATES]
-        )
-
-        base_formula = "y_z ~ C(date_label) + C(block)"
-        additive_formula = "y_z ~ C(date_label) + C(treatment) + C(block)"
-        full_formula = "y_z ~ C(date_label) * C(treatment) + C(block)"
-        base_fit = fit_mixedlm_best(base_formula, subset)
-        additive_fit = fit_mixedlm_best(additive_formula, subset)
-        full_fit = fit_mixedlm_best(full_formula, subset)
-
-        main_lrt = likelihood_ratio(base_fit, additive_fit)
-        interaction_lrt = likelihood_ratio(additive_fit, full_fit)
-        global_lrt = likelihood_ratio(base_fit, full_fit)
-        comparison = "M1–M5" if list(treatments) == FERTILIZED else "M0–M5"
-        bootstrap_p = np.nan
-        bootstrap_successful = 0
-        if comparison == "M1–M5" and outcome in {"biomass_kg_ha_used", "n_pct"}:
-            seed_offset = (
-                1000 * ["biomass_kg_ha_used", "n_pct"].index(outcome)
-                + 100 * SECTORS.index(sector)
-                + (5000 if response_scale == "log" else 0)
-            )
-            bootstrap = parametric_bootstrap_lrt(
-                subset,
-                reduced_formula=additive_formula,
-                full_formula=full_formula,
-                reduced_fit=additive_fit,
-                full_fit=full_fit,
-                replicates=BOOTSTRAP_REPLICATES,
-                seed=RANDOM_SEED + seed_offset,
-            )
-            bootstrap_p = bootstrap.p_bootstrap
-            bootstrap_successful = bootstrap.successful_replicates
-        random_variance = float(full_fit.cov_re.iloc[0, 0])
-        residuals = subset.assign(_residual=np.asarray(full_fit.resid, dtype=float))
-        residual_sd_by_date = residuals.groupby("date_label", observed=True)[
-            "_residual"
-        ].std()
-        positive_residual_sd = residual_sd_by_date.loc[residual_sd_by_date.gt(0)]
-        residual_sd_ratio = (
-            float(positive_residual_sd.max() / positive_residual_sd.min())
-            if len(positive_residual_sd) > 1
-            else np.nan
-        )
-        summary: dict[str, object] = {
-            "outcome": outcome,
-            "label": OUTCOME_LABELS[outcome],
-            "sector": sector,
-            "comparison": comparison,
-            "response_scale": response_scale,
-            "n": len(subset),
-            "plots": subset["plot_id"].nunique(),
-            "p_average_treatment": main_lrt.p_asymptotic,
-            "df_average_treatment": main_lrt.degrees_freedom,
-            "p_treatment_x_date_asymptotic": interaction_lrt.p_asymptotic,
-            "p_treatment_x_date_bootstrap": bootstrap_p,
-            "p_treatment_x_date": (
-                bootstrap_p
-                if np.isfinite(bootstrap_p)
-                else interaction_lrt.p_asymptotic
-            ),
-            "interaction_p_method": (
-                "parametric_bootstrap"
-                if np.isfinite(bootstrap_p)
-                else "asymptotic_lrt_support"
-            ),
-            "bootstrap_successful": bootstrap_successful,
-            "bootstrap_requested": (
-                BOOTSTRAP_REPLICATES if np.isfinite(bootstrap_p) else 0
-            ),
-            "df_treatment_x_date": interaction_lrt.degrees_freedom,
-            "p_global_trajectory": global_lrt.p_asymptotic,
-            "df_global_trajectory": global_lrt.degrees_freedom,
-            "random_intercept_variance_z": random_variance,
-            "random_effect_boundary": random_variance < 1e-6,
-            "residual_sd_max_min_ratio": residual_sd_ratio,
-            "optimizer": getattr(full_fit, "_audit_optimizer", "unknown"),
-            "optimizer_selection": getattr(full_fit, "_audit_selection", "unknown"),
-            "optimizer_candidates": len(getattr(full_fit, "_audit_candidates", ())),
-            "converged": bool(full_fit.converged),
-        }
-        return MixedTrajectoryResult(
-            outcome=outcome,
-            sector=sector,
-            treatments=tuple(treatments),
-            frame=subset,
-            center=center,
-            scale=scale,
-            base_fit=base_fit,
-            additive_fit=additive_fit,
-            full_fit=full_fit,
-            summary=summary,
-        )
-
-    mixed_models: dict[tuple[str, str, str], MixedTrajectoryResult] = {}
-    mixed_rows: list[dict[str, object]] = []
-    for outcome in LONGITUDINAL_OUTCOMES:
-        for sector in SECTORS:
-            for treatments in [FERTILIZED, TREATMENTS]:
-                result = fit_longitudinal_mixed(
-                    data.longitudinal,
-                    outcome=outcome,
-                    sector=sector,
-                    treatments=treatments,
-                )
-                comparison = cast(str, result.summary["comparison"])
-                mixed_models[(outcome, sector, comparison)] = result
-                mixed_rows.append(result.summary)
-
-    mixed_summary = pd.DataFrame(mixed_rows)
-    mixed_summary["variable_family"] = np.where(
-        mixed_summary["outcome"].isin(["biomass_kg_ha_used", "n_pct"]),
-        "secundaria_primitiva",
-        "apoyo_derivado",
-    )
-    mixed_summary["inference_tier"] = np.where(
-        mixed_summary["comparison"].eq("M1–M5"),
-        mixed_summary["variable_family"],
-        "complementaria",
-    )
-    mixed_summary = add_bh_within_families(
-        mixed_summary,
-        p_column="p_treatment_x_date",
-        family_columns=["comparison", "variable_family"],
-        output_column="p_treatment_x_date_bh",
-    )
-
-    biomass_scale_rows: list[dict[str, object]] = []
-    for sector in SECTORS:
-        raw_result = mixed_models[("biomass_kg_ha_used", sector, "M1–M5")]
-        log_result = fit_longitudinal_mixed(
-            data.longitudinal,
-            outcome="biomass_kg_ha_used",
-            sector=sector,
-            treatments=FERTILIZED,
-            response_scale="log",
-        )
-        for scale_label, result in [
-            ("original", raw_result),
-            ("log", log_result),
-        ]:
-            biomass_scale_rows.append(
-                {
-                    "sector": sector,
-                    "response_scale": scale_label,
-                    "p_treatment_x_date_asymptotic": result.summary[
-                        "p_treatment_x_date_asymptotic"
-                    ],
-                    "p_treatment_x_date_bootstrap": result.summary[
-                        "p_treatment_x_date_bootstrap"
-                    ],
-                    "bootstrap_successful": result.summary["bootstrap_successful"],
-                    "residual_sd_max_min_ratio": result.summary[
-                        "residual_sd_max_min_ratio"
-                    ],
-                    "random_effect_boundary": result.summary["random_effect_boundary"],
-                    "optimizer": result.summary["optimizer"],
-                    "converged": result.summary["converged"],
-                }
-            )
-    biomass_scale_sensitivity = pd.DataFrame(biomass_scale_rows)
-    inference_hierarchy = pd.DataFrame(
-        [
-            {
-                "tier": "Primaria",
-                "outcomes": "Rendimiento limpio M1–M5",
-                "multiplicity": "Contraste planificado; p sin ajuste",
-            },
-            {
-                "tier": "Secundaria",
-                "outcomes": "Biomasa aérea y concentración de N longitudinales",
-                "multiplicity": "FDR de Benjamini-Hochberg en la familia",
-            },
-            {
-                "tier": "Apoyo",
-                "outcomes": "N presente en biomasa, INN y componentes",
-                "multiplicity": "FDR por familia; no evidencia independiente",
-            },
-            {
-                "tier": "Exploratoria/sensibilidad",
-                "outcomes": "Correlaciones, EAN, productividad aparente del agua y políticas de datos",
-                "multiplicity": "FDR para correlaciones; el resto descriptivo",
-            },
-        ]
-    )
-    display_output(inference_hierarchy)
-    display_output(
-        mixed_summary[
-            [
-                "label",
-                "sector",
-                "comparison",
-                "inference_tier",
-                "n",
-                "plots",
-                "p_average_treatment",
-                "p_treatment_x_date_asymptotic",
-                "p_treatment_x_date_bootstrap",
-                "p_treatment_x_date",
-                "p_treatment_x_date_bh",
-                "interaction_p_method",
-                "p_global_trajectory",
-                "random_intercept_variance_z",
-                "random_effect_boundary",
-                "residual_sd_max_min_ratio",
-                "optimizer",
-                "optimizer_selection",
-                "converged",
-            ]
-        ].round(6)
-    )
-    display_output(
-        Markdown("**Sensibilidad de biomasa a escala original versus logarítmica:**")
-    )
-    display_output(biomass_scale_sensitivity.round(6))
-    yield "mixed_models"
-
-    # Notebook step: mixed_estimates
-    def mixed_emmeans(result: MixedTrajectoryResult) -> pd.DataFrame:
-        fit = result.full_fit
-        fixed_names = list(fit.fe_params.index)
-        covariance = np.asarray(
-            fit.cov_params().loc[fixed_names, fixed_names].to_numpy(), dtype=float
-        )
-        beta = np.asarray(fit.fe_params.to_numpy(), dtype=float)
-        design_info = fit.model.data.design_info
-        date_levels = [DATE_LABELS[date] for date in DATES]
-
+    def primary_residual_diagnostics(self) -> pd.DataFrame:
+        data = self._require_data()
         rows: list[dict[str, object]] = []
-        for date_label in date_levels:
-            for treatment in result.treatments:
-                new = pd.DataFrame(
-                    {
-                        "date_label": [date_label] * len(BLOCKS),
-                        "treatment": [treatment] * len(BLOCKS),
-                        "block": BLOCKS,
-                    }
-                )
-                new["date_label"] = categorical(new["date_label"], date_levels)
-                new["treatment"] = categorical(new["treatment"], result.treatments)
-                new["block"] = categorical(new["block"], BLOCKS)
-                design = np.asarray(
-                    patsy_api.build_design_matrices([design_info], new)[0],
-                    dtype=float,
-                )
-                xbar = design.mean(axis=0)
-                estimate_z = float(xbar @ beta)
-                se_z = float(np.sqrt(xbar @ covariance @ xbar))
-                estimate = result.center + result.scale * estimate_z
-                se = result.scale * se_z
-                rows.append(
-                    {
-                        "date_label": date_label,
-                        "treatment": treatment,
-                        "estimate": estimate,
-                        "se": se,
-                        "ci_low": estimate - 1.96 * se,
-                        "ci_high": estimate + 1.96 * se,
-                        "design_vector": xbar,
-                    }
-                )
-        return pd.DataFrame(rows)
-
-    def mixed_early_late_contrasts(
-        result: MixedTrajectoryResult,
-    ) -> pd.DataFrame:
-        if not set(FERTILIZED).issubset(result.treatments):
-            raise ValueError("El contraste requiere M1–M5")
-        emmeans = mixed_emmeans(result)
-        fit = result.full_fit
-        fixed_names = list(fit.fe_params.index)
-        covariance = np.asarray(
-            fit.cov_params().loc[fixed_names, fixed_names].to_numpy(), dtype=float
-        )
-        beta = np.asarray(fit.fe_params.to_numpy(), dtype=float)
-        rows: list[dict[str, object]] = []
-        for date_label in [DATE_LABELS[date] for date in DATES]:
-            date_rows = emmeans.loc[emmeans["date_label"].eq(date_label)].set_index(
-                "treatment"
+        for sector in data.spec.sectors:
+            result = self._fit_rcbd(
+                data.harvest,
+                outcome="clean_yield_kg_ha",
+                sector=sector,
+                date=None,
+                question="timing_m1_m5",
             )
-            early_vector = np.mean(
-                np.vstack(
-                    [
-                        np.asarray(cast(Any, date_rows.at["M1", "design_vector"])),
-                        np.asarray(cast(Any, date_rows.at["M2", "design_vector"])),
-                    ]
-                ),
-                axis=0,
+            residuals = np.asarray(result.fit.resid, dtype=float)
+            fitted = np.asarray(result.fit.fittedvalues, dtype=float)
+            fig, axes = plt.subplots(1, 2, figsize=(10.8, 4.6))
+            residual_axis, qq_axis = np.asarray(axes).ravel()
+            residual_axis.scatter(
+                fitted,
+                residuals,
+                color=self.palette[0],
+                alpha=0.80,
             )
-            late_vector = np.mean(
-                np.vstack(
-                    [
-                        np.asarray(cast(Any, date_rows.at["M4", "design_vector"])),
-                        np.asarray(cast(Any, date_rows.at["M5", "design_vector"])),
-                    ]
-                ),
-                axis=0,
-            )
-            contrast = early_vector - late_vector
-            difference_z = float(contrast @ beta)
-            se_z = float(np.sqrt(contrast @ covariance @ contrast))
-            difference = result.scale * difference_z
-            se = result.scale * se_z
-            rows.append(
-                {
-                    "date_label": date_label,
-                    "early_minus_late": difference,
-                    "se": se,
-                    "ci_low": difference - 1.96 * se,
-                    "ci_high": difference + 1.96 * se,
-                    "z": difference / se,
-                    "p_normal": 2.0 * stats.norm.sf(abs(difference / se)),
-                }
-            )
-        return pd.DataFrame(rows)
-
-    def plot_mixed_treatment(
-        ax: Any,
-        *,
-        result: MixedTrajectoryResult,
-        emmeans: pd.DataFrame,
-        outcome: str,
-        treatment: str,
-        date_positions: dict[str, float],
-        treatment_offsets: dict[str, float],
-        block_offsets: dict[str, float],
-    ) -> None:
-        observed = result.frame.loc[
-            result.frame["treatment"].astype(str).eq(treatment)
-        ].copy()
-        observed_x = np.asarray(
-            [
-                date_positions[str(date_label)]
-                + treatment_offsets[treatment]
-                + block_offsets[str(block)]
-                for date_label, block in zip(
-                    observed["date_label"], observed["block"], strict=True
-                )
-            ]
-        )
-        ax.scatter(
-            observed_x,
-            observed[outcome],
-            color=TREATMENT_COLORS[treatment],
-            alpha=0.18,
-            s=19,
-            linewidths=0,
-            zorder=1,
-        )
-        estimates = emmeans.loc[emmeans["treatment"].eq(treatment)].copy()
-        estimate_x = np.asarray(
-            [
-                date_positions[str(date_label)] + treatment_offsets[treatment]
-                for date_label in estimates["date_label"]
-            ]
-        )
-        ax.errorbar(
-            estimate_x,
-            estimates["estimate"],
-            yerr=[
-                estimates["estimate"] - estimates["ci_low"],
-                estimates["ci_high"] - estimates["estimate"],
-            ],
-            color=TREATMENT_COLORS[treatment],
-            marker="o",
-            linestyle="none",
-            markersize=MARKER_SIZE,
-            capsize=ERRORBAR_CAPSIZE,
-            elinewidth=INTERVAL_LINEWIDTH,
-            zorder=3,
-        )
-
-    def configure_mixed_outcome_axis(
-        ax: Any,
-        *,
-        result: MixedTrajectoryResult,
-        outcome: str,
-        sector: str,
-        row_index: int,
-        column_index: int,
-        outcome_count: int,
-        date_positions: dict[str, float],
-        treatment_offsets: dict[str, float],
-    ) -> None:
-        if outcome == "nni_revised":
-            ax.axhline(
-                1.0,
-                color=PLOT_PALETTE[5],
+            residual_axis.axhline(
+                0.0,
+                color=self.palette[5],
                 linestyle="--",
                 linewidth=REFERENCE_LINEWIDTH,
-                alpha=0.85,
             )
-            ax.text(
-                0.02,
-                1.0,
-                "INN = 1",
-                transform=ax.get_yaxis_transform(),
-                ha="left",
-                va="bottom",
-                fontsize=9,
-                color=PLOT_PALETTE[5],
+            residual_axis.set_xlabel("Valores ajustados")
+            residual_axis.set_ylabel("Residuos")
+            residual_axis.set_title("Residuos frente a valores ajustados")
+            (theoretical, ordered), (slope, intercept, _) = stats.probplot(
+                residuals,
+                dist="norm",
             )
-        treatment_positions = [
-            date_position + treatment_offsets[treatment]
-            for date_position in date_positions.values()
-            for treatment in FERTILIZED
-        ]
-        for position, treatment in zip(
-            treatment_positions,
-            FERTILIZED * len(date_positions),
-            strict=True,
-        ):
-            ax.text(
-                position,
-                -0.035,
-                treatment,
-                transform=ax.get_xaxis_transform(),
-                ha="center",
-                va="top",
-                fontsize=mpl.rcParams["xtick.labelsize"],
-                clip_on=False,
+            qq_axis.scatter(theoretical, ordered, color=self.palette[0])
+            qq_axis.plot(
+                theoretical,
+                slope * theoretical + intercept,
+                color=self.palette[5],
             )
-        ax.set_xticks(
-            list(date_positions.values()),
-            [DATE_LABELS[date] for date in DATES],
-        )
-        ax.tick_params(axis="x", which="major", pad=25, length=0)
-        ax.set_xlabel("")
-        if column_index == 0:
-            ax.set_ylabel(OUTCOME_LABELS[outcome])
-        if row_index == 0:
-            ax.set_title(sector.upper())
-
-    def plot_mixed_outcome_panel(
-        ax: Any,
-        *,
-        result: MixedTrajectoryResult,
-        outcome: str,
-        sector: str,
-        row_index: int,
-        column_index: int,
-        outcome_count: int,
-        date_positions: dict[str, float],
-        treatment_offsets: dict[str, float],
-        block_offsets: dict[str, float],
-    ) -> None:
-        emmeans = mixed_emmeans(result)
-        for treatment in FERTILIZED:
-            plot_mixed_treatment(
-                ax,
-                result=result,
-                emmeans=emmeans,
-                outcome=outcome,
-                treatment=treatment,
-                date_positions=date_positions,
-                treatment_offsets=treatment_offsets,
-                block_offsets=block_offsets,
+            qq_axis.set_xlabel("Cuantiles teóricos")
+            qq_axis.set_ylabel("Residuos ordenados")
+            qq_axis.set_title("Gráfico Q–Q normal")
+            fig.subplots_adjust(
+                left=0.08,
+                right=0.98,
+                bottom=0.14,
+                top=0.70,
+                wspace=0.28,
             )
-        configure_mixed_outcome_axis(
-            ax,
-            result=result,
-            outcome=outcome,
-            sector=sector,
-            row_index=row_index,
-            column_index=column_index,
-            outcome_count=outcome_count,
-            date_positions=date_positions,
-            treatment_offsets=treatment_offsets,
-        )
-
-    def plot_mixed_outcome_grid(
-        outcomes: Sequence[str],
-        *,
-        title: str,
-        filename_stem: str,
-    ) -> None:
-        date_levels = [DATE_LABELS[date] for date in DATES]
-        date_positions = {
-            date_label: float(index) for index, date_label in enumerate(date_levels)
-        }
-        treatment_offsets = dict(
-            zip(FERTILIZED, np.linspace(-0.28, 0.28, len(FERTILIZED)), strict=True)
-        )
-        block_offsets = dict(
-            zip(BLOCKS, np.linspace(-0.016, 0.016, len(BLOCKS)), strict=True)
-        )
-        fig, axes = mpl.subplots(
-            len(outcomes),
-            len(SECTORS),
-            figsize=(12.2, 6.2 if len(outcomes) == 1 else 9.2),
-            squeeze=False,
-        )
-        axes_array = np.asarray(axes)
-        for row_index, outcome in enumerate(outcomes):
-            for column_index, sector in enumerate(SECTORS):
-                result = mixed_models[(outcome, sector, "M1–M5")]
-                plot_mixed_outcome_panel(
-                    axes_array[row_index, column_index],
-                    result=result,
-                    outcome=outcome,
-                    sector=sector,
-                    row_index=row_index,
-                    column_index=column_index,
-                    outcome_count=len(outcomes),
-                    date_positions=date_positions,
-                    treatment_offsets=treatment_offsets,
-                    block_offsets=block_offsets,
-                )
-
-        p_lines: list[str] = []
-        for outcome in outcomes:
-            sector_values: list[str] = []
-            method_label = "LRT asintótica, apoyo"
-            for sector in SECTORS:
-                result = mixed_models[(outcome, sector, "M1–M5")]
-                p_value = float(cast(Any, result.summary["p_treatment_x_date"]))
-                adjusted_value = float(
-                    mixed_summary.loc[
-                        mixed_summary["outcome"].eq(outcome)
-                        & mixed_summary["sector"].eq(sector)
-                        & mixed_summary["comparison"].eq("M1–M5"),
-                        "p_treatment_x_date_bh",
-                    ].iloc[0]
-                )
-                method = str(result.summary["interaction_p_method"])
-                method_label = (
-                    "bootstrap paramétrico"
-                    if method == "parametric_bootstrap"
-                    else "LRT asintótica, apoyo"
-                )
-                sector_values.append(
-                    f"{sector} p = {p_value:.4f}, q = {adjusted_value:.4f}".replace(
-                        ".", ","
-                    )
-                )
-            p_lines.append(
-                f"{OUTCOME_LABELS[outcome]} — interacción calendario × fecha "
-                f"({method_label}): " + "; ".join(sector_values)
+            self._save_figure(
+                fig,
+                f"diagnostico_residuos_rendimiento_{sector.casefold()}",
+                title=f"Diagnóstico del modelo primario de rendimiento — {sector}",
+                subtitle="Comparación M1–M5 con bloque fijo.",
             )
-        add_figure_header(
-            fig,
-            title,
-            subtitle=(
-                "Puntos claros: parcelas individuales. Círculos: media marginal "
-                "del modelo completo ± IC normal del 95 %."
-            ),
-        )
-        figure_exporter.add_annotation(
-            fig,
-            "\n".join(p_lines),
-            x=0.07,
-            y=0.865 if len(outcomes) == 1 else 0.895,
-            color=mpl.rcParams["axes.labelcolor"],
-            fontsize=9.25,
-            linespacing=1.35,
-        )
-        add_figure_note(
-            fig,
-            (
-                "Fechas equidistantes en orden cronológico; M1–M5 se agrupan dentro de cada fecha "
-                "y las estimaciones no se conectan. El 16 sep M5 tenía 100 kg N ha⁻¹ "
-                "experimentales y M1–M4, 200 kg ha⁻¹."
-            ),
-        )
-        fig.subplots_adjust(
-            left=0.09,
-            right=0.98,
-            bottom=0.19 if len(outcomes) == 1 else 0.13,
-            top=0.76 if len(outcomes) == 1 else 0.77,
-            hspace=0.48,
-            wspace=0.12,
-        )
-        save_figure(fig, filename_stem)
-        mpl.show()
-        mpl.close(fig)
+            rows.append(self._diagnostic_row(result))
+        return self._show("primary_yield_diagnostics", pd.DataFrame(rows))
 
-    contrast_rows: list[pd.DataFrame] = []
-    for outcome in LONGITUDINAL_OUTCOMES:
-        for sector in SECTORS:
-            result = mixed_models[(outcome, sector, "M1–M5")]
-            contrasts = mixed_early_late_contrasts(result)
-            contrasts.insert(0, "sector", sector)
-            contrasts.insert(0, "outcome", OUTCOME_LABELS[outcome])
-            contrast_rows.append(contrasts)
-
-    early_late_contrasts = pd.concat(contrast_rows, ignore_index=True)
-    display_output(early_late_contrasts.round(4))
-
-    plot_mixed_outcome_grid(
-        ["biomass_kg_ha_used"],
-        title="Biomasa aérea estimada en las tres fechas (M1–M5)",
-        filename_stem="figura_04_trayectorias_biomasa_aerea",
-    )
-    plot_mixed_outcome_grid(
-        ["n_pct"],
-        title="Concentración de N estimada en las tres fechas (M1–M5)",
-        filename_stem="figura_05_trayectorias_concentracion_n",
-    )
-    plot_mixed_outcome_grid(
-        ["q_kg_n_ha", "nni_revised"],
-        title="Resultados derivados de apoyo: N en biomasa e INN",
-        filename_stem="anexo_trayectorias_n_biomasa_e_inn",
-    )
-    yield "mixed_estimates"
-
-    # Notebook step: september_sensitivity
-    sep_equal_dose_rows: list[dict[str, object]] = []
-    for outcome in LONGITUDINAL_OUTCOMES:
-        for sector in SECTORS:
-            frame = data.longitudinal.loc[
-                data.longitudinal["date"].astype("datetime64[ns]").eq(DATES[0])
-                & data.longitudinal["sector"].astype(str).eq(sector)
-            ]
-            result = fit_rcbd(
-                frame,
-                outcome=outcome,
-                treatments=["M1", "M2", "M3", "M4"],
+    def missing_n_sensitivity(self) -> pd.DataFrame:
+        data = self._require_data()
+        frame = data.longitudinal.copy()
+        missing = frame.loc[frame["n_pct"].isna()].copy()
+        rows: list[dict[str, object]] = []
+        if missing.empty:
+            return self._show(
+                "missing_n_sensitivity",
+                pd.DataFrame(
+                    [
+                        {
+                            "status": "no_missing_primary_n_values",
+                            "detail": "No se detectaron valores de N excluidos del análisis primario.",
+                        }
+                    ]
+                ),
             )
-            sep_equal_dose_rows.append(
+
+        for index, record in missing.iterrows():
+            date = pd.Timestamp(str(record["date"]))
+            sector = str(record["sector"])
+            subset = frame.loc[
+                frame["sector"].astype(str).eq(sector)
+                & pd.to_datetime(frame["date"].astype(str)).eq(date)
+            ].copy()
+            estimate = rcbd_missing_cell_estimate(
+                subset,
+                value_column="n_pct",
+                missing_treatment=str(record["treatment"]),
+                missing_block=str(record["block"]),
+                r_blocks=data.spec.repetitions,
+                t_treatments=len(data.spec.treatments),
+            )
+            primary_result = self._fit_rcbd(
+                subset,
+                outcome="n_pct",
+                sector=sector,
+                date=date,
+                question="all_m0_m5",
+            )
+            imputed = subset.copy()
+            imputed.loc[imputed.index == index, "n_pct"] = estimate
+            imputed_result = self._fit_rcbd(
+                imputed,
+                outcome="n_pct",
+                sector=sector,
+                date=date,
+                question="all_m0_m5",
+            )
+            rows.append(
                 {
-                    "outcome": OUTCOME_LABELS[outcome],
+                    "sample_id": record["sample_id"],
                     "sector": sector,
-                    "p_M1_M4": result.anova.loc["C(treatment)", "PR(>F)"],
-                    "cv_pct": result.cv_pct,
+                    "date": date,
+                    "treatment": str(record["treatment"]),
+                    "block": str(record["block"]),
+                    "workbook_origin": record["data_origin"],
+                    "rcbd_missing_cell_estimate_n_pct": estimate,
+                    "primary_complete_case_p": primary_result.global_p,
+                    "single_imputation_sensitivity_p": imputed_result.global_p,
+                    "primary_policy": "estimated workbook row excluded",
                 }
             )
-    display_output(pd.DataFrame(sep_equal_dose_rows).round(4))
-    yield "september_sensitivity"
+        return self._show("missing_n_sensitivity", pd.DataFrame(rows))
 
-    # Notebook step: figure_manifest
-    figure_manifest = pd.DataFrame(
-        [
-            {
-                "archivo": "figura_01_cronograma_y_n_acumulado",
-                "ubicación sugerida": "Métodos — cuerpo principal",
-                "función": (
-                    "Define los calendarios, el cierre del pastoreo, las aplicaciones "
-                    "comunes y la dosis acumulada a cada muestreo."
-                ),
-                "prioridad": "Esencial",
-            },
-            {
-                "archivo": "figura_01b_zoom_aplicaciones_experimentales",
-                "ubicación sugerida": "Métodos — cuerpo principal o detalle",
-                "función": (
-                    "Amplía junio–octubre para hacer legibles las fechas, los saltos "
-                    "experimentales y las envolventes del período incierto."
-                ),
-                "prioridad": "Alta",
-            },
-            {
-                "archivo": "figura_02_aportes_mensuales_de_agua",
-                "ubicación sugerida": "Sitio y manejo — cuerpo principal",
-                "función": (
-                    "Muestra la distribución temporal de precipitación y riego sin "
-                    "confundir aportes brutos con agua disponible o consumida."
-                ),
-                "prioridad": "Alta",
-            },
-            {
-                "archivo": "figura_03_rendimiento_dos_preguntas",
-                "ubicación sugerida": "Resultados — cuerpo principal",
-                "función": (
-                    "Separa la respuesta a N adicional de la comparación M1–M5 y "
-                    "muestra datos crudos, magnitud e incertidumbre."
-                ),
-                "prioridad": "Esencial",
-            },
-            {
-                "archivo": "figura_04_trayectorias_biomasa_aerea",
-                "ubicación sugerida": "Resultados — cuerpo principal",
-                "función": (
-                    "Resume la variable primitiva de biomasa con datos individuales, "
-                    "medias longitudinales e interacción calendario × fecha."
-                ),
-                "prioridad": "Esencial",
-            },
-            {
-                "archivo": "figura_05_trayectorias_concentracion_n",
-                "ubicación sugerida": "Resultados — cuerpo principal",
-                "función": (
-                    "Resume la variable primitiva de concentración de N sin mezclarla "
-                    "con desenlaces derivados."
-                ),
-                "prioridad": "Esencial",
-            },
-            {
-                "archivo": "anexo_trayectorias_n_biomasa_e_inn",
-                "ubicación sugerida": "Anexo técnico",
-                "función": (
-                    "Presenta N presente en biomasa e INN como resultados derivados de "
-                    "apoyo, sin contarlos como evidencia primaria independiente."
-                ),
-                "prioridad": "Complementaria",
-            },
-            {
-                "archivo": "figura_06_componentes_del_rendimiento",
-                "ubicación sugerida": "Resultados — cuerpo principal o síntesis",
-                "función": (
-                    "Muestra los componentes con observaciones e intervalos sin usar la "
-                    "relación algebraica como prueba de compensación fisiológica."
-                ),
-                "prioridad": "Alta",
-            },
-            {
-                "archivo": "anexo_contrastes_rendimiento",
-                "ubicación sugerida": "Anexo o discusión de incertidumbre",
-                "función": (
-                    "Cuantifica la respuesta frente a M0 y cuánto desacuerdo entre "
-                    "calendarios sigue siendo compatible con la inferencia clásica."
-                ),
-                "prioridad": "Alta hasta disponer del anexo probabilístico",
-            },
-            {
-                "archivo": "anexo_trayectorias_observadas_*",
-                "ubicación sugerida": "Anexo",
-                "función": (
-                    "Conserva la comparación descriptiva M0–M5 sin confundirla con "
-                    "la pregunta longitudinal principal M1–M5."
-                ),
-                "prioridad": "Complementaria",
-            },
+    def joint_sector_analysis(self) -> pd.DataFrame:
+        data = self._require_data()
+        frame = data.harvest.copy()
+        frame = frame.loc[frame["treatment"].astype(str).ne("M0")].dropna(
+            subset=["clean_yield_kg_ha"]
+        )
+        frame = frame.assign(
+            sector=frame["sector"].astype(str),
+            treatment=frame["treatment"].astype(str),
+            block=frame["block"].astype(str),
+        )
+        additive = smf.ols(
+            "clean_yield_kg_ha ~ C(sector) + C(sector):C(block) + C(treatment)",
+            data=frame,
+        ).fit()
+        interaction = smf.ols(
+            "clean_yield_kg_ha ~ C(sector) + C(sector):C(block) + C(treatment) + C(sector):C(treatment)",
+            data=frame,
+        ).fit()
+        comparison = sm.stats.anova_lm(additive, interaction)
+        rows = pd.DataFrame(
+            [
+                {
+                    "estimand": "descriptive_sector_by_treatment_pattern",
+                    "f_statistic": float(comparison.iloc[1]["F"]),
+                    "p_value": float(comparison.iloc[1]["Pr(>F)"]),
+                    "df_difference": float(comparison.iloc[1]["df_diff"]),
+                    "causal_interpretation": False,
+                    "reason": "one physical sector per water condition",
+                }
+            ]
+        )
+        return self._show("joint_sector_descriptive_model", rows)
+
+    @staticmethod
+    def _partial_correlation_from_regression(
+        frame: pd.DataFrame,
+        *,
+        x: str,
+        y: str,
+        controls: Sequence[str],
+    ) -> tuple[float, float, int]:
+        needed = [x, y, *controls]
+        subset = frame[needed].dropna().copy()
+        if len(subset) < 5:
+            return np.nan, np.nan, len(subset)
+        formula_terms = [x] + [f"C({column})" for column in controls]
+        fit = smf.ols(f"{y} ~ " + " + ".join(formula_terms), data=subset).fit()
+        t_value = float(fit.tvalues[x])
+        df = float(fit.df_resid)
+        partial_r = math.copysign(math.sqrt(t_value**2 / (t_value**2 + df)), t_value)
+        return partial_r, float(fit.pvalues[x]), len(subset)
+
+    def correlation_audit(self) -> pd.DataFrame:
+        data = self._require_data()
+        final_longitudinal = data.longitudinal.loc[
+            pd.to_datetime(data.longitudinal["date"].astype(str)).eq(
+                max(
+                    pd.Timestamp(value)
+                    for value in data.longitudinal["date"].cat.categories
+                )
+            ),
+            ["plot_id", "biomass_kg_ha", "n_pct", "q_kg_n_ha", "nni_primary"],
         ]
-    )
-    display_output(figure_manifest)
-    yield "figure_manifest"
+        frame = data.harvest.merge(
+            final_longitudinal,
+            on="plot_id",
+            how="left",
+            validate="one_to_one",
+            suffixes=("", "_final"),
+        )
+        pairs = [
+            (
+                "biomass_kg_ha_final",
+                "clean_yield_kg_ha",
+                False,
+                "distinct measurements, shared plot",
+            ),
+            ("n_pct", "clean_yield_kg_ha", False, "distinct measurements, shared plot"),
+            ("q_kg_n_ha", "clean_yield_kg_ha", True, "N accumulated contains biomass"),
+            ("nni_primary", "clean_yield_kg_ha", True, "deterministic index"),
+            (
+                "panicle_density_m2",
+                "clean_yield_kg_ha",
+                False,
+                "component and outcome share harvest process",
+            ),
+            (
+                "w1000_g",
+                "clean_yield_kg_ha",
+                False,
+                "component and outcome share harvest process",
+            ),
+            (
+                "estimated_seeds_per_panicle",
+                "clean_yield_kg_ha",
+                True,
+                "clean mass occurs in both variables",
+            ),
+            (
+                "harvest_index_pct",
+                "clean_yield_kg_ha",
+                True,
+                "yield is the numerator of harvest index",
+            ),
+            (
+                "panicle_density_m2",
+                "estimated_seeds_per_panicle",
+                True,
+                "panicle count occurs in denominator",
+            ),
+        ]
+        rows: list[dict[str, object]] = []
+        for sector in data.spec.sectors:
+            sector_frame = frame.loc[frame["sector"].astype(str).eq(sector)].copy()
+            for x, y, coupled, reason in pairs:
+                for population, selector in (
+                    ("all_m0_m5", np.ones(len(sector_frame), dtype=bool)),
+                    (
+                        "timing_m1_m5",
+                        sector_frame["treatment"].astype(str).ne("M0").to_numpy(),
+                    ),
+                ):
+                    subset = sector_frame.loc[selector].dropna(subset=[x, y])
+                    if len(subset) >= 3:
+                        pearson = stats.pearsonr(subset[x], subset[y])
+                        raw_r = float(pearson.statistic)
+                        raw_p = float(pearson.pvalue)
+                    else:
+                        raw_r = raw_p = np.nan
+                    partial_r, partial_p, partial_n = (
+                        self._partial_correlation_from_regression(
+                            subset.assign(
+                                treatment=subset["treatment"].astype(str),
+                                block=subset["block"].astype(str),
+                            ),
+                            x=x,
+                            y=y,
+                            controls=["treatment", "block"],
+                        )
+                    )
+                    rows.append(
+                        {
+                            "sector": sector,
+                            "population": population,
+                            "x": x,
+                            "y": y,
+                            "n_raw": len(subset),
+                            "pearson_r": raw_r,
+                            "pearson_p": raw_p,
+                            "n_adjusted": partial_n,
+                            "partial_r_controlling_treatment_block": partial_r,
+                            "regression_p_for_x": partial_p,
+                            "mathematical_coupling": coupled,
+                            "coupling_or_design_note": reason,
+                            "role": "exploratory",
+                        }
+                    )
+        return self._show("correlation_audit", pd.DataFrame(rows))
 
-    # Notebook step: automatic_summary
-    def format_p(value: float) -> str:
-        if value < 0.0001:
-            return "< 0.0001"
-        return f"{value:.4f}"
+    # ------------------------------------------------------------------
+    # Mixed models
+    # ------------------------------------------------------------------
 
-    summary_lines: list[str] = []
-    for sector in SECTORS:
-        primary = cast(
-            Any,
-            final_rcbd.loc[
-                final_rcbd["outcome"].eq("clean_yield_kg_ha")
-                & final_rcbd["sector"].eq(sector)
-                & final_rcbd["comparison"].eq("M1–M5")
-            ].iloc[0],
+    def _prepare_mixed_frame(
+        self,
+        *,
+        sector: str,
+        outcome: str,
+        scale: Literal["raw", "log"],
+        source: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
+        data = self._require_data()
+        frame = (source if source is not None else data.longitudinal).copy()
+        treatments = [value for value in data.spec.treatments if value != "M0"]
+        subset = frame.loc[
+            frame["sector"].astype(str).eq(sector)
+            & frame["treatment"].astype(str).isin(treatments),
+            ["plot_id", "block", "treatment", "date", "date_label", outcome],
+        ].dropna(subset=[outcome])
+        subset = subset.assign(
+            block=subset["block"].astype(str),
+            treatment=pd.Categorical(
+                subset["treatment"].astype(str),
+                categories=treatments,
+                ordered=True,
+            ),
+            date_label=pd.Categorical(
+                subset["date_label"].astype(str),
+                categories=[
+                    str(value) for value in frame["date_label"].drop_duplicates()
+                ],
+                ordered=True,
+            ),
         )
-        complementary = cast(
-            Any,
-            final_rcbd.loc[
-                final_rcbd["outcome"].eq("clean_yield_kg_ha")
-                & final_rcbd["sector"].eq(sector)
-                & final_rcbd["comparison"].eq("M0–M5")
-            ].iloc[0],
-        )
-        summary_lines.append(
-            f"- **{sector}:** rendimiento M1–M5 p = {format_p(primary.p_treatment)}; "
-            f"M0–M5 p = {format_p(complementary.p_treatment)}; "
-            f"CV M1–M5 = {primary.cv_pct:.1f} % y "
-            f"CV M0–M5 = {complementary.cv_pct:.1f} %."
-        )
+        y = subset[outcome].to_numpy(float)
+        if scale == "log":
+            if np.any(y <= 0.0):
+                raise ValueError(
+                    f"{outcome} contiene valores no positivos; no puede usarse log."
+                )
+            transformed = np.log(y)
+        else:
+            transformed = y
+        center = float(np.mean(transformed))
+        standard_deviation = float(np.std(transformed, ddof=1))
+        if not np.isfinite(standard_deviation) or standard_deviation <= 0.0:
+            raise ValueError(f"No se puede estandarizar {outcome} en {sector}.")
+        subset["y_z"] = (transformed - center) / standard_deviation
+        subset.attrs["transform_center"] = center
+        subset.attrs["transform_scale"] = standard_deviation
+        subset.attrs["response_scale"] = scale
+        subset.attrs["outcome"] = outcome
+        return subset
 
-    summary_lines.append(
-        "\n**Pruebas longitudinales M1–M5 (interacción tratamiento × fecha):**"
-    )
-    for raw_row in mixed_summary.loc[
-        mixed_summary["comparison"].eq("M1–M5")
-    ].itertuples(index=False):
-        row = cast(Any, raw_row)
-        method_label = (
-            "bootstrap paramétrico"
-            if row.interaction_p_method == "parametric_bootstrap"
-            else "LRT asintótica de apoyo"
+    def _fit_mixed_model(
+        self,
+        *,
+        sector: str,
+        outcome: str,
+        scale: Literal["raw", "log"],
+        source: pd.DataFrame | None = None,
+        bootstrap_replicates: int | None = None,
+    ) -> MixedModelResult:
+        frame = self._prepare_mixed_frame(
+            sector=sector,
+            outcome=outcome,
+            scale=scale,
+            source=source,
         )
-        summary_lines.append(
-            f"- {row.label}, {row.sector}: p = {format_p(row.p_treatment_x_date)} "
-            f"({method_label}; q BH = {format_p(row.p_treatment_x_date_bh)})"
-            + (
-                "; varianza de parcela en el límite."
-                if row.random_effect_boundary
-                else "."
+        additive_formula = "y_z ~ C(block) + C(treatment) + C(date_label)"
+        interaction_formula = "y_z ~ C(block) + C(treatment) * C(date_label)"
+        additive_fit = fit_mixedlm_best(additive_formula, frame)
+        interaction_fit = fit_mixedlm_best(interaction_formula, frame)
+        asymptotic = likelihood_ratio(additive_fit, interaction_fit)
+        requested = (
+            self.bootstrap_replicates
+            if bootstrap_replicates is None
+            else bootstrap_replicates
+        )
+        bootstrap = parametric_bootstrap_lrt(
+            frame,
+            reduced_formula=additive_formula,
+            full_formula=interaction_formula,
+            reduced_fit=additive_fit,
+            full_fit=interaction_fit,
+            response_column="y_z",
+            replicates=requested,
+            seed=_stable_seed(
+                sector, outcome, scale, "bootstrap", base=self.random_seed
+            ),
+        )
+        residuals = frame.assign(
+            _residual=np.asarray(interaction_fit.resid, dtype=float)
+        )
+        residual_sd = residuals.groupby("date_label", observed=True)["_residual"].std()
+        positive = residual_sd.loc[residual_sd.gt(0.0)]
+        residual_sd_ratio = (
+            float(positive.max() / positive.min()) if len(positive) > 1 else np.nan
+        )
+        summary: dict[str, object] = {
+            "sector": sector,
+            "outcome": outcome,
+            "scale": scale,
+            "n": len(frame),
+            "plots": frame["plot_id"].nunique(),
+            "lrt_statistic": asymptotic.statistic,
+            "lrt_df": asymptotic.degrees_freedom,
+            "p_asymptotic": asymptotic.p_asymptotic,
+            "p_parametric_bootstrap": bootstrap.p_bootstrap,
+            "bootstrap_successful": bootstrap.successful_replicates,
+            "bootstrap_requested": bootstrap.requested_replicates,
+            "additive_optimizer": getattr(additive_fit, "_audit_optimizer", pd.NA),
+            "interaction_optimizer": getattr(
+                interaction_fit, "_audit_optimizer", pd.NA
+            ),
+            "additive_converged": bool(additive_fit.converged),
+            "interaction_converged": bool(interaction_fit.converged),
+            "random_intercept_variance": float(interaction_fit.cov_re.iloc[0, 0]),
+            "residual_variance": float(interaction_fit.scale),
+            "residual_sd_max_min_ratio": residual_sd_ratio,
+        }
+        result = MixedModelResult(
+            sector=sector,
+            outcome=outcome,
+            scale=scale,
+            frame=frame,
+            additive_fit=additive_fit,
+            interaction_fit=interaction_fit,
+            summary=summary,
+        )
+        self.mixed_results[f"{sector}|{outcome}|{scale}"] = result
+        return result
+
+    def mixed_models(self) -> pd.DataFrame:
+        data = self._require_data()
+        specifications = [
+            ("biomass_kg_ha", "raw"),
+            ("biomass_kg_ha", "log"),
+            ("n_pct", "raw"),
+        ]
+        rows: list[dict[str, object]] = []
+        for sector in data.spec.sectors:
+            for outcome, scale in specifications:
+                result = self._fit_mixed_model(
+                    sector=sector,
+                    outcome=outcome,
+                    scale=cast(Literal["raw", "log"], scale),
+                )
+                rows.append(result.summary)
+        summary = pd.DataFrame(rows)
+        summary["family"] = np.where(
+            summary["outcome"].eq("biomass_kg_ha"),
+            "biomass_scale_sensitivity",
+            "n_concentration",
+        )
+        summary["p_fdr"] = np.nan
+        for indices in summary.groupby("family").groups.values():
+            index_list = list(indices)
+            summary.loc[index_list, "p_fdr"] = benjamini_hochberg(
+                summary.loc[index_list, "p_parametric_bootstrap"].to_numpy(float)
+            )
+        return self._show("mixed_model_interaction_tests", summary)
+
+    @staticmethod
+    def _backtransform(
+        value: np.ndarray, *, center: float, scale: float, response_scale: str
+    ) -> np.ndarray:
+        transformed = center + scale * value
+        return np.exp(transformed) if response_scale == "log" else transformed
+
+    def _mixed_predictions(
+        self, result: MixedModelResult
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        fit = result.interaction_fit
+        frame = result.frame
+        treatments = [str(value) for value in frame["treatment"].cat.categories]
+        date_levels = [str(value) for value in frame["date_label"].cat.categories]
+        blocks = sorted(frame["block"].unique().tolist())
+        beta = np.asarray(fit.fe_params, dtype=float)
+        covariance = np.asarray(fit.cov_params(), dtype=float)[: len(beta), : len(beta)]
+        rng = np.random.default_rng(
+            _stable_seed(
+                result.sector,
+                result.outcome,
+                result.scale,
+                "pred",
+                base=self.random_seed,
             )
         )
+        draws = rng.multivariate_normal(beta, covariance, size=20000)
+        center = float(frame.attrs["transform_center"])
+        response_scale_value = float(frame.attrs["transform_scale"])
+        grid_vectors: dict[tuple[str, str], np.ndarray] = {}
+        prediction_rows: list[dict[str, object]] = []
+        for treatment in treatments:
+            for date_label in date_levels:
+                grid = pd.DataFrame(
+                    {
+                        "treatment": [treatment] * len(blocks),
+                        "date_label": [date_label] * len(blocks),
+                        "block": blocks,
+                    }
+                )
+                vector = self._design_matrix(fit, grid).mean(axis=0)
+                grid_vectors[(treatment, date_label)] = vector
+                z_draws = draws @ vector
+                raw_draws = self._backtransform(
+                    z_draws,
+                    center=center,
+                    scale=response_scale_value,
+                    response_scale=result.scale,
+                )
+                prediction_rows.append(
+                    {
+                        "sector": result.sector,
+                        "outcome": result.outcome,
+                        "scale": result.scale,
+                        "treatment": treatment,
+                        "date_label": date_label,
+                        "estimate": float(
+                            np.median(raw_draws)
+                            if result.scale == "log"
+                            else np.mean(raw_draws)
+                        ),
+                        "ci_low": float(np.quantile(raw_draws, 0.025)),
+                        "ci_high": float(np.quantile(raw_draws, 0.975)),
+                        "estimand": (
+                            "geometric_typical_value"
+                            if result.scale == "log"
+                            else "arithmetic_mean"
+                        ),
+                    }
+                )
 
-    summary_lines.append("\n**Sensibilidad de escala de la biomasa:**")
-    for sector in SECTORS:
-        scale_rows = biomass_scale_sensitivity.loc[
-            biomass_scale_sensitivity["sector"].eq(sector)
-        ].set_index("response_scale")
-        original_p = float(
-            cast(Any, scale_rows.at["original", "p_treatment_x_date_bootstrap"])
+        contrast_rows: list[dict[str, object]] = []
+        for date_label in date_levels:
+            early_z = 0.5 * (
+                draws @ grid_vectors[("M1", date_label)]
+                + draws @ grid_vectors[("M2", date_label)]
+            )
+            late_z = 0.5 * (
+                draws @ grid_vectors[("M4", date_label)]
+                + draws @ grid_vectors[("M5", date_label)]
+            )
+            early = self._backtransform(
+                early_z,
+                center=center,
+                scale=response_scale_value,
+                response_scale=result.scale,
+            )
+            late = self._backtransform(
+                late_z,
+                center=center,
+                scale=response_scale_value,
+                response_scale=result.scale,
+            )
+            difference = early - late
+            contrast_rows.append(
+                {
+                    "sector": result.sector,
+                    "outcome": result.outcome,
+                    "scale": result.scale,
+                    "date_label": date_label,
+                    "contrast": "mean_M1_M2_minus_mean_M4_M5",
+                    "estimate": float(
+                        np.median(difference)
+                        if result.scale == "log"
+                        else np.mean(difference)
+                    ),
+                    "ci_low": float(np.quantile(difference, 0.025)),
+                    "ci_high": float(np.quantile(difference, 0.975)),
+                    "approx_probability_positive": float(np.mean(difference > 0.0)),
+                    "interval_method": "asymptotic_fixed_effect_draws",
+                }
+            )
+        return pd.DataFrame(prediction_rows), pd.DataFrame(contrast_rows)
+
+    def mixed_estimates(self) -> pd.DataFrame:
+        if not self.mixed_results:
+            self.mixed_models()
+        predictions: list[pd.DataFrame] = []
+        contrasts: list[pd.DataFrame] = []
+        for result in self.mixed_results.values():
+            prediction, contrast = self._mixed_predictions(result)
+            predictions.append(prediction)
+            contrasts.append(contrast)
+        prediction_table = pd.concat(predictions, ignore_index=True)
+        contrast_table = pd.concat(contrasts, ignore_index=True)
+        self.tables["mixed_model_targeted_contrasts"] = contrast_table
+        self._show("mixed_model_predictions", prediction_table)
+
+        # Plot only one primary scale per outcome; the alternative biomass scale
+        # remains visible in the sensitivity table.
+        plot_table = prediction_table.loc[
+            (
+                prediction_table["outcome"].eq("biomass_kg_ha")
+                & prediction_table["scale"].eq("raw")
+            )
+            | (
+                prediction_table["outcome"].eq("n_pct")
+                & prediction_table["scale"].eq("raw")
+            )
+        ]
+        data = self._require_data()
+        treatment_colors = dict(
+            zip(
+                [value for value in data.spec.treatments if value != "M0"],
+                self.palette[1:6],
+                strict=True,
+            )
         )
-        log_p = float(cast(Any, scale_rows.at["log", "p_treatment_x_date_bootstrap"]))
-        summary_lines.append(
-            f"- {sector}: escala original p = {format_p(original_p)}; "
-            f"escala logarítmica p = {format_p(log_p)}."
+        for outcome in ["biomass_kg_ha", "n_pct"]:
+            subset = plot_table.loc[plot_table["outcome"].eq(outcome)]
+            fig, axes = plt.subplots(
+                1, len(data.spec.sectors), figsize=(12.2, 5.3), sharey=True
+            )
+            axes_array = np.atleast_1d(axes)
+            for axis, sector in zip(axes_array, data.spec.sectors, strict=True):
+                sector_data = subset.loc[subset["sector"].eq(sector)]
+                date_levels = sector_data["date_label"].drop_duplicates().tolist()
+                date_centers = np.arange(len(date_levels), dtype=float)
+                positions = dict(zip(date_levels, date_centers, strict=True))
+                treatment_offsets = dict(
+                    zip(
+                        treatment_colors,
+                        np.linspace(-0.28, 0.28, len(treatment_colors)),
+                        strict=True,
+                    )
+                )
+                block_offsets = dict(
+                    zip(
+                        data.spec.blocks,
+                        np.linspace(-0.016, 0.016, len(data.spec.blocks)),
+                        strict=True,
+                    )
+                )
+                model_result = self.mixed_results[f"{sector}|{outcome}|raw"]
+                for treatment, color in treatment_colors.items():
+                    treatment_data = sector_data.loc[
+                        sector_data["treatment"].eq(treatment)
+                    ]
+                    observed = model_result.frame.loc[
+                        model_result.frame["treatment"].astype(str).eq(treatment)
+                    ]
+                    observed_x = np.asarray(
+                        [
+                            positions[str(date_label)]
+                            + treatment_offsets[treatment]
+                            + block_offsets[str(block)]
+                            for date_label, block in zip(
+                                observed["date_label"], observed["block"], strict=True
+                            )
+                        ]
+                    )
+                    axis.scatter(
+                        observed_x,
+                        observed[outcome],
+                        color=color,
+                        alpha=0.18,
+                        s=19,
+                        linewidths=0,
+                        zorder=1,
+                    )
+                    x = [
+                        positions[label] + treatment_offsets[treatment]
+                        for label in treatment_data["date_label"]
+                    ]
+                    axis.errorbar(
+                        x,
+                        treatment_data["estimate"],
+                        yerr=np.vstack(
+                            [
+                                treatment_data["estimate"] - treatment_data["ci_low"],
+                                treatment_data["ci_high"] - treatment_data["estimate"],
+                            ]
+                        ),
+                        marker="o",
+                        linestyle="none",
+                        markersize=MARKER_SIZE,
+                        capsize=ERRORBAR_CAPSIZE,
+                        elinewidth=INTERVAL_LINEWIDTH,
+                        label=treatment,
+                        color=color,
+                        zorder=3,
+                    )
+                treatment_positions = [
+                    center + treatment_offsets[treatment]
+                    for center in date_centers
+                    for treatment in treatment_colors
+                ]
+                axis.set_xticks(
+                    treatment_positions,
+                    list(treatment_colors) * len(date_centers),
+                    minor=True,
+                )
+                axis.tick_params(axis="x", which="minor", pad=5, length=0)
+                axis.set_xticks(date_centers, date_levels)
+                axis.tick_params(axis="x", which="major", pad=25, length=0)
+                axis.set_title(sector.upper())
+                axis.set_xlabel("")
+            y_label = (
+                "Biomasa (kg MS ha⁻¹)"
+                if outcome == "biomass_kg_ha"
+                else "Concentración de N (%)"
+            )
+            axes_array[0].set_ylabel(y_label)
+            fig.subplots_adjust(
+                left=0.09,
+                right=0.98,
+                bottom=0.23,
+                top=0.69,
+                wspace=0.12,
+            )
+            self._save_figure(
+                fig,
+                f"modelo_mixto_{outcome}",
+                title=(
+                    "Estimaciones del modelo mixto: biomasa aérea"
+                    if outcome == "biomass_kg_ha"
+                    else "Estimaciones del modelo mixto: concentración de N"
+                ),
+                subtitle=(
+                    "Puntos claros: parcelas individuales. Círculos: estimación marginal "
+                    "del modelo completo e intervalo del 95 %."
+                ),
+                note=(
+                    "Fechas equidistantes; M1–M5 se agrupan dentro de cada fecha y las "
+                    "estimaciones no se conectan. La interacción se calibra por bootstrap."
+                ),
+            )
+        return prediction_table
+
+    def september_sensitivity(self) -> pd.DataFrame:
+        data = self._require_data()
+        sample_dates = [
+            pd.Timestamp(value) for value in data.longitudinal["date"].cat.categories
+        ]
+        schedule = data.spec.schedule.copy()
+        rows: list[dict[str, object]] = []
+        for record in schedule.itertuples(index=False):
+            for application_number, application_date in enumerate(
+                [record.first_application, record.second_application], start=1
+            ):
+                if pd.isna(application_date):
+                    continue
+                application = _as_timestamp(application_date)
+                rows.append(
+                    {
+                        "treatment": record.treatment,
+                        "application_number": application_number,
+                        "application_date": application,
+                        "same_day_as_sampling": application in set(sample_dates),
+                        "interpretation_rule": (
+                            "do_not_attribute_same_day_sample_to_application_without_field_chronology"
+                            if application in set(sample_dates)
+                            else "chronology_unambiguous_at_day_resolution"
+                        ),
+                    }
+                )
+        chronology = pd.DataFrame(rows)
+        self._show("application_sampling_chronology", chronology)
+
+        if not self.mixed_results:
+            self.mixed_models()
+        sensitivity = pd.DataFrame(
+            [result.summary for result in self.mixed_results.values()]
         )
-    summary_lines.append(
-        "La diferencia entre escalas en secano impide presentar esa interacción de "
-        "biomasa como una conclusión robusta a la especificación."
+        sensitivity = sensitivity.loc[
+            sensitivity["outcome"].eq("biomass_kg_ha"),
+            [
+                "sector",
+                "outcome",
+                "scale",
+                "p_asymptotic",
+                "p_parametric_bootstrap",
+                "residual_sd_max_min_ratio",
+            ],
+        ]
+        return self._show("biomass_scale_sensitivity", sensitivity)
+
+    # ------------------------------------------------------------------
+    # Synthesis and export
+    # ------------------------------------------------------------------
+
+    def figure_manifest(self) -> pd.DataFrame:
+        manifest = pd.DataFrame(self.figure_metadata)
+        return self._show("figure_manifest", manifest)
+
+    def automatic_summary(self) -> pd.DataFrame:
+        data = self._require_data()
+        rows: list[dict[str, object]] = []
+
+        if "yield_planned_contrasts" not in self.tables:
+            self.yield_contrasts()
+        contrasts = self.tables["yield_planned_contrasts"]
+        for record in contrasts.itertuples(index=False):
+            rows.append(
+                {
+                    "domain": "yield",
+                    "sector": record.sector,
+                    "estimand": record.contrast,
+                    "estimate": record.estimate,
+                    "interval_low": record.ci_low,
+                    "interval_high": record.ci_high,
+                    "p_value": record.p_value,
+                    "interpretation_template": (
+                        "report_estimate_and_interval; do_not_convert_nonsignificance_to_equivalence"
+                    ),
+                }
+            )
+
+        if "mixed_model_interaction_tests" not in self.tables:
+            self.mixed_models()
+        mixed = self.tables["mixed_model_interaction_tests"]
+        for record in mixed.itertuples(index=False):
+            p_value = _as_float(record.p_parametric_bootstrap)
+            rows.append(
+                {
+                    "domain": "trajectory",
+                    "sector": record.sector,
+                    "estimand": f"{record.outcome}|{record.scale}|treatment_by_date",
+                    "estimate": record.lrt_statistic,
+                    "interval_low": np.nan,
+                    "interval_high": np.nan,
+                    "p_value": p_value,
+                    "interpretation_template": (
+                        "trajectory_evidence_on_declared_scale"
+                        if p_value < self.alpha
+                        else "trajectory_difference_not_detected_on_declared_scale"
+                    ),
+                }
+            )
+
+        if "component_reconstruction_null" not in self.tables:
+            self.component_correlations()
+        reconstruction = self.tables["component_reconstruction_null"]
+        for record in reconstruction.itertuples(index=False):
+            lower = _as_float(record.null_lower_95)
+            observed = _as_float(record.observed_correlation)
+            upper = _as_float(record.null_upper_95)
+            rows.append(
+                {
+                    "domain": "yield_components",
+                    "sector": record.sector,
+                    "estimand": f"reconstruction_null|{record.pattern}",
+                    "estimate": observed,
+                    "interval_low": lower,
+                    "interval_high": upper,
+                    "p_value": record.two_sided_tail_around_null_median,
+                    "interpretation_template": (
+                        "association_not_independent_evidence_of_compensation"
+                        if lower <= observed <= upper
+                        else "association_more_extreme_than_reconstruction_null"
+                    ),
+                }
+            )
+
+        rows.append(
+            {
+                "domain": "scope",
+                "sector": "both_observed_sectors",
+                "estimand": "water_condition",
+                "estimate": np.nan,
+                "interval_low": np.nan,
+                "interval_high": np.nan,
+                "p_value": np.nan,
+                "interpretation_template": "descriptive_only_one_physical_sector_per_condition",
+            }
+        )
+        rows.append(
+            {
+                "domain": "source",
+                "sector": "all",
+                "estimand": "workbook_sha256",
+                "estimate": data.spec.source_sha256,
+                "interval_low": pd.NA,
+                "interval_high": pd.NA,
+                "p_value": np.nan,
+                "interpretation_template": "all_observed_values_read_from_xlsx",
+            }
+        )
+        return self._show("automatic_summary", pd.DataFrame(rows))
+
+    def export_artifacts(self) -> pd.DataFrame:
+        if not self.export_results:
+            frame = pd.DataFrame(
+                [{"status": "export_disabled", "directory": str(self.results_dir)}]
+            )
+            return self._show("export_manifest", frame)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        rows: list[dict[str, object]] = []
+        for name, table in sorted(self.tables.items()):
+            path = self.results_dir / f"{name}.csv"
+            table.to_csv(path, index=False)
+            rows.append(
+                {
+                    "artifact_type": "table",
+                    "name": name,
+                    "path": str(path),
+                    "rows": len(table),
+                    "columns": len(table.columns),
+                }
+            )
+        if self.figure_metadata:
+            manifest_path = self.results_dir / "figure_manifest.json"
+            manifest_path.write_text(
+                json.dumps(self.figure_metadata, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            rows.append(
+                {
+                    "artifact_type": "figure_manifest",
+                    "name": "figure_manifest",
+                    "path": str(manifest_path),
+                    "rows": len(self.figure_metadata),
+                    "columns": np.nan,
+                }
+            )
+        return self._show("export_manifest", pd.DataFrame(rows))
+
+    # Compatibility no-op retained for the former notebook section.
+    def rcbd_functions(self) -> pd.DataFrame:
+        frame = pd.DataFrame(
+            [
+                {
+                    "model": "Y ~ treatment + block",
+                    "anova": "Type II",
+                    "marginal_means": "averaged over observed block levels",
+                    "pairwise": "Tukey-adjusted after the global treatment test",
+                }
+            ]
+        )
+        return self._show("rcbd_method", frame)
+
+
+def run_all_longitudinal() -> None:
+    """Execute the full report from the command line."""
+
+    import matplotlib
+
+    matplotlib.use("Agg", force=True)
+    analysis = LongitudinalNotebook(
+        figure_profile="standalone", print_figure_json=False
     )
+    for method_name in LONGITUDINAL_STEPS:
+        getattr(analysis, method_name)()
 
-    summary_lines.append(
-        "\n**Lectura recomendada:** los ANOVA por fecha describen momentos concretos; "
-        "el modelo longitudinal evalúa directamente si las trayectorias cambian con el "
-        "calendario. La ausencia de una diferencia de rendimiento entre M1–M5 no debe "
-        "traducirse en equivalencia exacta, y las diferencias entre sectores siguen "
-        "siendo descriptivas."
-    )
-    display_output(Markdown("\n".join(summary_lines)))
-    yield "automatic_summary"
 
-    # Notebook step: export_artifacts
-    if EXPORT_RESULTS:
-        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-        longitudinal_rcbd.to_csv(
-            RESULTS_DIR / "anova_por_fecha_y_sector.csv", index=False
-        )
-        final_rcbd.to_csv(RESULTS_DIR / "anova_variables_finales.csv", index=False)
-        derived_descriptive.to_csv(
-            RESULTS_DIR / "indicadores_derivados_descriptivos.csv", index=False
-        )
-        dry_matter_sensitivity.to_csv(
-            RESULTS_DIR / "sensibilidad_materia_seca_150_152.csv", index=False
-        )
-        joint_results.to_csv(
-            RESULTS_DIR / "anova_conjunto_entre_sectores.csv", index=False
-        )
-        diagnostics.to_csv(
-            RESULTS_DIR / "diagnosticos_modelos_clasicos.csv", index=False
-        )
-        raw_correlations.to_csv(RESULTS_DIR / "correlaciones_tesis.csv", index=False)
-        correlation_audit.to_csv(
-            RESULTS_DIR / "correlaciones_extension_auditoria.csv", index=False
-        )
-        mixed_summary.to_csv(
-            RESULTS_DIR / "modelos_longitudinales_mixtos.csv", index=False
-        )
-        biomass_scale_sensitivity.to_csv(
-            RESULTS_DIR / "sensibilidad_escala_biomasa.csv", index=False
-        )
-        inference_hierarchy.to_csv(
-            RESULTS_DIR / "jerarquia_inferencial.csv", index=False
-        )
-        early_late_contrasts.to_csv(
-            RESULTS_DIR / "contrastes_temprano_menos_tardio.csv", index=False
-        )
-        flagged_dm.to_csv(
-            RESULTS_DIR / "registros_materia_seca_a_verificar.csv", index=False
-        )
-        figure_manifest.to_csv(RESULTS_DIR / "seleccion_figuras_tesis.csv", index=False)
-        water_inputs.to_csv(RESULTS_DIR / "aportes_mensuales_de_agua.csv", index=False)
-        yield_contrasts.to_csv(
-            RESULTS_DIR / "contrastes_rendimiento_clasicos.csv", index=False
-        )
-        print("Tablas exportadas en:", RESULTS_DIR.resolve())
-        for path in sorted(RESULTS_DIR.glob("*.csv")):
-            print(" -", path.name)
-
-    if EXPORT_FIGURES:
-        exported_figure_directory = figure_exporter.output_directory
-        print("Figuras exportadas en:", exported_figure_directory.resolve())
-        for path in sorted(exported_figure_directory.glob("*")):
-            if path.suffix.lower() in {".png", ".pdf", ".json"}:
-                print(" -", path.name)
-    yield "export_artifacts"
+if __name__ == "__main__":
+    run_all_longitudinal()

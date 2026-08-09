@@ -27,8 +27,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Optional, Tuple, cast
+from typing import Any, cast
 
 NUM_RE = r"[+-]?(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?(?:[eE][+-]?\d+)?"
 
@@ -63,29 +64,35 @@ KNOWN_UNITS = [
 # Unit matching pattern
 UNIT_ATOM = "|".join(sorted((re.escape(u) for u in KNOWN_UNITS), key=len, reverse=True))
 UNIT_GROUP = rf"(?:{UNIT_ATOM})(?:\s*(?:/|\*|x|×|·|\s|per)\s*(?:{UNIT_ATOM}|\d+))*"
-MEAS_RE = re.compile(rf"(?<!\w)(?P<num>{NUM_RE})(?P<sep>\s+)(?P<unit>{UNIT_GROUP})(?!\w)")
+MEAS_RE = re.compile(
+    rf"(?<!\w)(?P<num>{NUM_RE})(?P<sep>\s+)(?P<unit>{UNIT_GROUP})(?!\w)"
+)
 SINGLE_UNIT_CTX_RE = re.compile(r"^\s*[A-Za-zÁÉÍÓÚáéíóúÜüÑñ]")
 
 # Common markdown regions we should leave untouched when performing textual substitutions.
-PROTECT_RE = re.compile(r"(```.*?```|`[^`]*`|\$\$.*?\$\$|\$.*?\$)", re.S)
+PROTECT_RE = re.compile(r"(```.*?```|`[^`]*`|\$\$.*?\$\$|\$.*?\$)", re.DOTALL)
 
 # Image syntax: ![alt](path "title")
-IMAGE_RE = re.compile(r"!\[(?P<alt>[^\]\n]*)\]\((?P<src>[^)\s]+)(?:\s+\"(?P<title>[^\"]+)\")?\)")
+IMAGE_RE = re.compile(
+    r"!\[(?P<alt>[^\]\n]*)\]\((?P<src>[^)\s]+)(?:\s+\"(?P<title>[^\"]+)\")?\)"
+)
 
 # Convert unicode exponents and minus to textual patterns that can be wrapped in siunitx units
-SUPERSCRIPTS = str.maketrans({
-    "⁰": "0",
-    "¹": "1",
-    "²": "2",
-    "³": "3",
-    "⁴": "4",
-    "⁵": "5",
-    "⁶": "6",
-    "⁷": "7",
-    "⁸": "8",
-    "⁹": "9",
-    "⁻": "-",
-})
+SUPERSCRIPTS = str.maketrans(
+    {
+        "⁰": "0",
+        "¹": "1",
+        "²": "2",
+        "³": "3",
+        "⁴": "4",
+        "⁵": "5",
+        "⁶": "6",
+        "⁷": "7",
+        "⁸": "8",
+        "⁹": "9",
+        "⁻": "-",
+    }
+)
 
 
 def escape_latex(text: str) -> str:
@@ -158,17 +165,29 @@ def replace_units_in_text(text: str) -> str:
     return MEAS_RE.sub(_rep, text)
 
 
-def preprocess_markdown(md: str, transform_units: bool, transform_figures: bool,
-                      md_dir: Path,
-                      figure_pdf_suffix: str, figure_meta_suffix: str,
-                      figure_full_suffixes: Tuple[str, ...], figure_width_default: str,
-                      figure_placement_default: str) -> str:
+def preprocess_markdown(
+    md: str,
+    transform_units: bool,
+    transform_figures: bool,
+    md_dir: Path,
+    figure_pdf_suffix: str,
+    figure_meta_suffix: str,
+    figure_full_suffixes: tuple[str, ...],
+    figure_width_default: str,
+    figure_placement_default: str,
+) -> str:
     """Apply unit normalization and optional figure expansion only outside math/code."""
 
     if transform_figures:
-        md = _apply_figure_rewrite(md, md_dir, figure_pdf_suffix, figure_meta_suffix,
-                                   figure_full_suffixes, figure_width_default,
-                                   figure_placement_default)
+        md = _apply_figure_rewrite(
+            md,
+            md_dir,
+            figure_pdf_suffix,
+            figure_meta_suffix,
+            figure_full_suffixes,
+            figure_width_default,
+            figure_placement_default,
+        )
 
     if transform_units:
         return _apply_outside_protected(md, replace_units_in_text)
@@ -180,89 +199,131 @@ def _apply_outside_protected(md: str, fn: Callable[[str], str]) -> str:
     out: list[str] = []
     last = 0
     for match in PROTECT_RE.finditer(md):
-        out.append(fn(md[last:match.start()]))
+        out.append(fn(md[last : match.start()]))
         out.append(match.group(0))
         last = match.end()
     out.append(fn(md[last:]))
     return "".join(out)
 
 
-def _apply_figure_rewrite(md: str, md_dir: Path, figure_pdf_suffix: str,
-                        figure_meta_suffix: str, figure_full_suffixes: Tuple[str, ...],
-                        figure_width_default: str, figure_placement_default: str) -> str:
+def _apply_figure_rewrite(
+    md: str,
+    md_dir: Path,
+    figure_pdf_suffix: str,
+    figure_meta_suffix: str,
+    figure_full_suffixes: tuple[str, ...],
+    figure_width_default: str,
+    figure_placement_default: str,
+) -> str:
     def _replace(match: re.Match[str]) -> str:
-        alt = (match.group("alt") or "").strip()
-        src = (match.group("src") or "").strip()
-        title_attr = (match.group("title") or "").strip()
-
-        # Markdown URLs are intentionally skipped.
-        if "://" in src or src.startswith("http"):
-            return match.group(0)
-
-        source_path = (md_dir / src).resolve()
-        bundle = _resolve_figure_assets(source_path, figure_pdf_suffix, figure_meta_suffix, figure_full_suffixes)
-        if bundle is None:
-            return match.group(0)
-
-        meta, pdf_path = bundle
-        plot_pdf = _latex_path(pdf_path, md_dir)
-
-        # Metadata and fallback extraction from markdown
-        meta_title = str(meta.get("title", "")).strip()
-        meta_caption = str(meta.get("caption", "")).strip()
-
-        md_title = ""
-        md_caption = ""
-        if "|" in alt:
-            md_title, md_caption = [x.strip() for x in alt.split("|", 1)]
-            if not md_caption:
-                md_caption = md_title
-        else:
-            md_title = alt
-
-        md_title = md_title or title_attr
-
-        caption_short = meta_title or md_title
-        caption_text = meta_caption or md_caption or md_title
-
-        placement = str(meta.get("placement", figure_placement_default))
-        width = str(meta.get("width", figure_width_default))
-        include_opts = str(meta.get("includegraphics", "")).strip()
-        if width:
-            if include_opts:
-                include_opts = f"{include_opts}, width={width}"
-            else:
-                include_opts = f"width={width}"
-
-        if not width and include_opts:
-            include_opts = include_opts
-
-        base_label = (Path(src).stem).replace("_", "-")
-        if base_label.endswith("-full"):
-            base_label = base_label[:-5]
-        if base_label.endswith("_full"):
-            base_label = base_label[:-5]
-        label = str(meta.get("label", f"fig:{base_label}"))
-
-        lines = [f"\\begin{{figure}}[{escape_latex(placement)}]", "\\centering"]
-        if include_opts:
-            lines.append(f"\\includegraphics[{include_opts}]{{{escape_latex(plot_pdf)}}}")
-        else:
-            lines.append(f"\\includegraphics{{{escape_latex(plot_pdf)}}}")
-
-        if caption_text:
-            if caption_short and caption_short != caption_text:
-                lines.append(f"\\caption[{escape_latex(caption_short)}]{{{escape_latex(caption_text)}}}")
-            else:
-                lines.append(f"\\caption{{{escape_latex(caption_text)}}}")
-
-        if label:
-            lines.append(f"\\label{{{escape_latex(label)}}}")
-
-        lines.append("\\end{figure}")
-        return "\n" + "\n".join(lines) + "\n"
+        return _replace_figure(
+            match,
+            md_dir=md_dir,
+            figure_pdf_suffix=figure_pdf_suffix,
+            figure_meta_suffix=figure_meta_suffix,
+            figure_full_suffixes=figure_full_suffixes,
+            figure_width_default=figure_width_default,
+            figure_placement_default=figure_placement_default,
+        )
 
     return IMAGE_RE.sub(_replace, md)
+
+
+def _replace_figure(
+    match: re.Match[str],
+    *,
+    md_dir: Path,
+    figure_pdf_suffix: str,
+    figure_meta_suffix: str,
+    figure_full_suffixes: tuple[str, ...],
+    figure_width_default: str,
+    figure_placement_default: str,
+) -> str:
+    alt = (match.group("alt") or "").strip()
+    src = (match.group("src") or "").strip()
+    title_attr = (match.group("title") or "").strip()
+    if "://" in src or src.startswith("http"):
+        return match.group(0)
+
+    bundle = _resolve_figure_assets(
+        (md_dir / src).resolve(),
+        figure_pdf_suffix,
+        figure_meta_suffix,
+        figure_full_suffixes,
+    )
+    if bundle is None:
+        return match.group(0)
+
+    meta, pdf_path = bundle
+    return _render_figure(
+        meta=meta,
+        source=src,
+        plot_pdf=_latex_path(pdf_path, md_dir),
+        alt=alt,
+        title_attr=title_attr,
+        figure_width_default=figure_width_default,
+        figure_placement_default=figure_placement_default,
+    )
+
+
+def _figure_captions(
+    meta: dict[str, Any], alt: str, title_attr: str
+) -> tuple[str, str]:
+    meta_title = str(meta.get("title", "")).strip()
+    meta_caption = str(meta.get("caption", "")).strip()
+    if "|" in alt:
+        md_title, md_caption = [part.strip() for part in alt.split("|", 1)]
+        md_caption = md_caption or md_title
+    else:
+        md_title, md_caption = alt, ""
+    md_title = md_title or title_attr
+    return meta_title or md_title, meta_caption or md_caption or md_title
+
+
+def _figure_include_options(meta: dict[str, Any], default_width: str) -> str:
+    width = str(meta.get("width", default_width))
+    options = str(meta.get("includegraphics", "")).strip()
+    if not width:
+        return options
+    return f"{options}, width={width}" if options else f"width={width}"
+
+
+def _render_figure(
+    *,
+    meta: dict[str, Any],
+    source: str,
+    plot_pdf: str,
+    alt: str,
+    title_attr: str,
+    figure_width_default: str,
+    figure_placement_default: str,
+) -> str:
+    caption_short, caption_text = _figure_captions(meta, alt, title_attr)
+    placement = str(meta.get("placement", figure_placement_default))
+    options = _figure_include_options(meta, figure_width_default)
+    base_label = Path(source).stem.replace("_", "-").removesuffix("-full")
+    label = str(meta.get("label", f"fig:{base_label}"))
+    include = (
+        f"\\includegraphics[{options}]{{{escape_latex(plot_pdf)}}}"
+        if options
+        else f"\\includegraphics{{{escape_latex(plot_pdf)}}}"
+    )
+    lines = [
+        f"\\begin{{figure}}[{escape_latex(placement)}]",
+        "\\centering",
+        include,
+    ]
+    if caption_text:
+        caption = escape_latex(caption_text)
+        if caption_short and caption_short != caption_text:
+            caption = f"[{escape_latex(caption_short)}]{{{caption}}}"
+        else:
+            caption = f"{{{caption}}}"
+        lines.append(f"\\caption{caption}")
+    if label:
+        lines.append(f"\\label{{{escape_latex(label)}}}")
+    lines.append("\\end{figure}")
+    return "\n" + "\n".join(lines) + "\n"
 
 
 def _resolve_figure_assets(
@@ -270,29 +331,41 @@ def _resolve_figure_assets(
     figure_pdf_suffix: str,
     figure_meta_suffix: str,
     figure_full_suffixes: tuple[str, ...],
-) -> Optional[Tuple[Dict[str, Any], Path]]:
+) -> tuple[dict[str, Any], Path] | None:
     if not image_path.exists():
         return None
 
     stem = image_path.stem
-    candidates: list[str] = _dedup([stem] + [stem[:-len(s)] for s in figure_full_suffixes if stem.endswith(s)])
+    candidates: list[str] = _dedup(
+        [stem] + [stem[: -len(s)] for s in figure_full_suffixes if stem.endswith(s)]
+    )
 
     for base in candidates:
         pdf_candidate = image_path.with_name(f"{base}{figure_pdf_suffix}.pdf")
         if pdf_candidate.exists():
-            meta = _load_figure_metadata(image_path.with_name(f"{base}{figure_meta_suffix}.json")) or {}
+            meta = (
+                _load_figure_metadata(
+                    image_path.with_name(f"{base}{figure_meta_suffix}.json")
+                )
+                or {}
+            )
             return meta, pdf_candidate
 
     # Optional fallback: if plot PDF exists with exact stem.
     fallback_pdf = image_path.with_suffix(".pdf")
     if fallback_pdf.exists():
-        meta = _load_figure_metadata(image_path.with_name(f"{stem}{figure_meta_suffix}.json")) or {}
+        meta = (
+            _load_figure_metadata(
+                image_path.with_name(f"{stem}{figure_meta_suffix}.json")
+            )
+            or {}
+        )
         return meta, fallback_pdf
 
     return None
 
 
-def _load_figure_metadata(json_path: Path) -> Optional[Dict[str, Any]]:
+def _load_figure_metadata(json_path: Path) -> dict[str, Any] | None:
     if not json_path.exists():
         return None
 
@@ -303,7 +376,7 @@ def _load_figure_metadata(json_path: Path) -> Optional[Dict[str, Any]]:
 
     if isinstance(raw, dict):
         data = cast(dict[str, Any], raw)
-        metadata: Dict[str, Any] = {}
+        metadata: dict[str, Any] = {}
         for key, value in data.items():
             metadata[key] = value
         return metadata
@@ -327,13 +400,15 @@ def _latex_path(path: Path, reference_dir: Path) -> str:
 
 def run_pandoc(
     md_text: str,
-    output: Optional[Path],
+    output: Path | None,
     standalone: bool,
     use_siunitx: bool,
     use_citeproc: bool,
 ) -> str:
     if not shutil.which("pandoc"):
-        raise RuntimeError("No se encontró pandoc en PATH. Instálalo para convertir md -> LaTeX.")
+        raise RuntimeError(
+            "No se encontró pandoc en PATH. Instálalo para convertir md -> LaTeX."
+        )
 
     cmd = [
         "pandoc",
@@ -349,7 +424,9 @@ def run_pandoc(
 
     tmp_header = None
     if use_siunitx:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".tex", delete=False) as header:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".tex", delete=False
+        ) as header:
             header.write("\\usepackage{siunitx}\n")
             tmp_header = Path(header.name)
         cmd.extend(["--include-in-header", str(tmp_header)])
@@ -360,8 +437,7 @@ def run_pandoc(
             input=md_text,
             text=True,
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
     finally:
         if tmp_header is not None:
@@ -374,10 +450,7 @@ def run_pandoc(
     return str(output)
 
 
-def compile_latex(tex_path: Path, *, engine: str, passes: int = 2) -> Path:
-    if not tex_path.exists():
-        raise RuntimeError(f"El archivo TeX no existe: {tex_path}")
-
+def _select_latex_engine(engine: str) -> str:
     preferred = (
         "pdflatex",
         "xelatex",
@@ -385,75 +458,84 @@ def compile_latex(tex_path: Path, *, engine: str, passes: int = 2) -> Path:
         "tectonic",
     )
 
-    selected_engine = engine
     if engine == "auto":
-        selected_engine = next(
+        engine = next(
             (candidate for candidate in preferred if shutil.which(candidate)),
             "",
         )
-
-    if not selected_engine:
+    if not engine:
         raise RuntimeError(
             "No se encontró un compilador LaTeX disponible en PATH "
             "(pdflatex/xelatex/lualatex/tectonic). Instalá uno o usá --no-compile."
         )
+    return engine
 
-    if selected_engine == "tectonic":
-        passes = 1
-    cwd = tex_path.parent
 
-    def run_once(command: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+def _run_latex_passes(
+    command: list[str],
+    *,
+    cwd: Path,
+    engine: str,
+    passes: int,
+    env: dict[str, str] | None = None,
+) -> None:
+    for _ in range(max(1, passes)):
+        result = subprocess.run(
             command,
             cwd=cwd,
             text=True,
             check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
+            env=env,
+        )
+        if result.returncode:
+            details = result.stderr.strip() or result.stdout.strip()
+            suffix = f"\n{details}" if details else ""
+            raise RuntimeError(
+                f"Error al compilar LaTeX con {engine}: código {result.returncode}{suffix}"
+            )
+
+
+def _compile_tectonic(tex_path: Path, engine: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="tectonic-cache-") as cache_dir:
+        env = os.environ.copy()
+        env.setdefault("TECTONIC_CACHE_DIR", cache_dir)
+        _run_latex_passes(
+            [engine, str(tex_path)],
+            cwd=tex_path.parent,
+            engine=engine,
+            passes=1,
             env=env,
         )
 
+
+def compile_latex(tex_path: Path, *, engine: str, passes: int = 2) -> Path:
+    if not tex_path.exists():
+        raise RuntimeError(f"El archivo TeX no existe: {tex_path}")
+
+    selected_engine = _select_latex_engine(engine)
     if selected_engine == "tectonic":
-        with tempfile.TemporaryDirectory(prefix="tectonic-cache-") as cache_dir:
-            command = [selected_engine, str(tex_path)]
-            env = os.environ.copy()
-            env.setdefault("TECTONIC_CACHE_DIR", cache_dir)
-
-            for _ in range(max(1, passes)):
-                result = run_once(command, env=env)
-                if result.returncode != 0:
-                    stderr = result.stderr.strip()
-                    stdout = result.stdout.strip()
-                    details = stderr or stdout
-                    raise RuntimeError(
-                        f"Error al compilar LaTeX con {selected_engine}: código {result.returncode}"
-                        + (f"\n{details}" if details else "")
-                    )
+        _compile_tectonic(tex_path, selected_engine)
     else:
-        common_args = [
-            "-interaction=nonstopmode",
-            "-halt-on-error",
-            "-file-line-error",
-        ]
-        command = [selected_engine] + common_args + [str(tex_path)]
-
-        for _ in range(max(1, passes)):
-            result = run_once(command)
-            if result.returncode != 0:
-                stderr = result.stderr.strip()
-                stdout = result.stdout.strip()
-                details = stderr or stdout
-                raise RuntimeError(
-                    f"Error al compilar LaTeX con {selected_engine}: código {result.returncode}"
-                    + (f"\n{details}" if details else "")
-                )
+        _run_latex_passes(
+            [
+                selected_engine,
+                "-interaction=nonstopmode",
+                "-halt-on-error",
+                "-file-line-error",
+                str(tex_path),
+            ],
+            cwd=tex_path.parent,
+            engine=selected_engine,
+            passes=passes,
+        )
 
     return tex_path.with_suffix(".pdf")
 
 
 def _parse_suffix_list(raw: str) -> tuple[str, ...]:
     if not raw.strip():
-        return tuple()
+        return ()
     items = tuple(s.strip() for s in raw.split(",") if s.strip())
     normalized = tuple({*items})
     return tuple(sorted(normalized, key=len, reverse=True))
@@ -467,7 +549,9 @@ def main() -> int:
         )
     )
     parser.add_argument("input", type=Path, help="Archivo Markdown de entrada")
-    parser.add_argument("-o", "--output", type=Path, default=None, help="Archivo LaTeX de salida")
+    parser.add_argument(
+        "-o", "--output", type=Path, default=None, help="Archivo LaTeX de salida"
+    )
     parser.add_argument(
         "--no-standalone",
         action="store_true",

@@ -1,17 +1,42 @@
-"""Reproducible analyses for the Festuca nitrogen-timing experiment."""
+"""Reproducible analyses for the Festuca nitrogen-timing experiment.
 
-from festuca_analysis.longitudinal import LongitudinalNotebook
-from festuca_analysis.notebooks import (
-    reproduce_annex,
-    show_annex_figure,
-    show_annex_methodology_tables,
-    show_annex_table,
+The source loader remains importable without importing the Bayesian stack.  The
+notebook controllers are resolved lazily so the classical workflow does not
+depend on PyMC at import time.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from festuca_analysis.source_data import (
+    ExperimentData,
+    ExperimentSpec,
+    load_experiment_data,
+    source_provenance_table,
 )
 
+if TYPE_CHECKING:
+    from festuca_analysis.annex import ProbabilisticAnnex
+    from festuca_analysis.longitudinal import LongitudinalNotebook
+
 __all__ = [
+    "ExperimentData",
+    "ExperimentSpec",
     "LongitudinalNotebook",
-    "reproduce_annex",
-    "show_annex_figure",
-    "show_annex_methodology_tables",
-    "show_annex_table",
+    "ProbabilisticAnnex",
+    "load_experiment_data",
+    "source_provenance_table",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name == "LongitudinalNotebook":
+        from festuca_analysis.longitudinal import LongitudinalNotebook
+
+        return LongitudinalNotebook
+    if name == "ProbabilisticAnnex":
+        from festuca_analysis.annex import ProbabilisticAnnex
+
+        return ProbabilisticAnnex
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

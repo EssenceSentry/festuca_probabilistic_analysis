@@ -33,6 +33,9 @@ class BootstrapLikelihoodRatioResult:
     requested_replicates: int
 
 
+MixedLMCandidate = tuple[Any, str, tuple[str, ...]]
+
+
 def rcbd_missing_cell_estimate(
     frame: pd.DataFrame,
     *,
@@ -77,26 +80,18 @@ def likelihood_ratio(reduced: Any, full: Any) -> LikelihoodRatioResult:
     )
 
 
-def fit_mixedlm_best(
+def _fit_mixedlm_candidates(
     formula: str,
     frame: pd.DataFrame,
     *,
-    group_column: str = "plot_id",
-    methods: Sequence[str] = ("lbfgs", "bfgs", "powell", "nm", "cg"),
-    stop_at_first_converged: bool = False,
-    maxiter: int = 5000,
-) -> Any:
-    """Fit every requested optimizer and retain the best converged solution.
-
-    A finite likelihood is not sufficient evidence of convergence.  The main
-    analysis therefore evaluates all optimizers and selects the converged fit
-    with the largest log-likelihood.  Bootstrap refits may opt into an early
-    exit after the first converged fit to keep the resampling cost tractable.
-    """
-    candidates: list[tuple[Any, str, tuple[str, ...]]] = []
+    group_column: str,
+    methods: Sequence[str],
+    stop_at_first_converged: bool,
+    maxiter: int,
+) -> tuple[list[MixedLMCandidate], list[str]]:
+    candidates: list[MixedLMCandidate] = []
     errors: list[str] = []
     smf_api = cast(Any, smf)
-
     for method in dict.fromkeys(methods):
         try:
             with warnings.catch_warnings(record=True) as caught:
@@ -118,13 +113,52 @@ def fit_mixedlm_best(
                     break
         except Exception as exc:  # noqa: BLE001 - the audit records every failure
             errors.append(f"{method}: {type(exc).__name__}: {exc}")
+    return candidates, errors
+
+
+def fit_mixedlm_best(
+    formula: str,
+    frame: pd.DataFrame,
+    *,
+    group_column: str = "plot_id",
+    methods: Sequence[str] = ("lbfgs", "bfgs", "powell", "nm", "cg"),
+    stop_at_first_converged: bool = False,
+    maxiter: int = 5000,
+    allow_nonconverged: bool = False,
+) -> Any:
+    """Fit every requested optimizer and retain the best converged solution.
+
+    A finite likelihood is not sufficient evidence of convergence.  The main
+    analysis therefore evaluates all optimizers and selects the converged fit
+    with the largest log-likelihood.  Bootstrap refits may opt into an early
+    exit after the first converged fit to keep the resampling cost tractable.
+    """
+    candidates, errors = _fit_mixedlm_candidates(
+        formula,
+        frame,
+        group_column=group_column,
+        methods=methods,
+        stop_at_first_converged=stop_at_first_converged,
+        maxiter=maxiter,
+    )
 
     if not candidates:
         detail = " | ".join(errors) if errors else "ningún ajuste finito"
         raise RuntimeError(f"No se pudo ajustar MixedLM. {detail}")
 
     converged = [candidate for candidate in candidates if bool(candidate[0].converged)]
-    eligible = converged or candidates
+    if not converged and not allow_nonconverged:
+        audit_detail = " | ".join(
+            f"{method}: llf={float(fit.llf):.6g}, warnings={warning_messages}"
+            for fit, method, warning_messages in candidates
+        )
+        error_detail = " | ".join(errors)
+        details = " | ".join(part for part in [audit_detail, error_detail] if part)
+        raise RuntimeError(
+            "MixedLM produjo ajustes finitos, pero ninguno convergió. " + details
+        )
+
+    eligible = converged if converged else candidates
     best_fit, best_method, best_warnings = max(
         eligible,
         key=lambda candidate: float(candidate[0].llf),
@@ -142,7 +176,7 @@ def fit_mixedlm_best(
     best_fit._audit_warnings = best_warnings
     best_fit._audit_candidates = audit
     best_fit._audit_selection = (
-        "best_converged" if converged else "best_finite_nonconverged"
+        "best_converged" if converged else "best_finite_nonconverged_opt_in"
     )
     return best_fit
 

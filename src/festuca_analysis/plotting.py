@@ -231,16 +231,12 @@ class FigureExporter:
         subtitle = (
             pending.latex_subtitle
             if pending.latex_subtitle is not None
-            else _to_latex(pending.subtitle)
-            if pending.subtitle is not None
-            else None
+            else _to_latex(pending.subtitle) if pending.subtitle is not None else None
         )
         note = (
             pending.latex_note
             if pending.latex_note is not None
-            else _to_latex(pending.note)
-            if pending.note is not None
-            else None
+            else _to_latex(pending.note) if pending.note is not None else None
         )
         annotations = [
             latex_annotation or _to_latex(annotation)
@@ -273,8 +269,26 @@ class FigureExporter:
             },
         }
 
+    def _decorate_for_display(
+        self,
+        fig: Any,
+        pending: _PendingFigureMetadata,
+    ) -> None:
+        """Add standalone context after a clean thesis export is complete."""
+        if self.profile != "thesis" or pending.title is None:
+            return
+        add_figure_header(
+            fig,
+            _to_mathtext(pending.title),
+            subtitle=(
+                _to_mathtext(pending.subtitle) if pending.subtitle is not None else None
+            ),
+        )
+        if pending.note is not None:
+            add_figure_note(fig, _to_mathtext(pending.note))
+
     def save(self, fig: Any, filename_stem: str) -> dict[str, object]:
-        """Save one figure according to the selected profile."""
+        """Save a clean thesis PDF and a fully decorated display image."""
         pending = self._metadata.pop(id(fig), _PendingFigureMetadata())
         payload = self._payload(filename_stem=filename_stem, pending=pending)
         output_directory = self.output_directory
@@ -289,12 +303,6 @@ class FigureExporter:
                 dpi=self.dpi,
                 bbox_inches="tight",
             )
-        if self.profile == "thesis":
-            fig.savefig(
-                output_directory / f"{filename_stem}_full.png",
-                dpi=self.dpi,
-                bbox_inches="tight",
-            )
         if self.profile != "standalone":
             serialized = json.dumps(payload, ensure_ascii=False, indent=2)
             (output_directory / f"{filename_stem}.json").write_text(
@@ -303,11 +311,18 @@ class FigureExporter:
             )
             if self.print_json:
                 print(serialized)
+            self._decorate_for_display(fig, pending)
+            fig.savefig(
+                output_directory / f"{filename_stem}_full.png",
+                dpi=self.dpi,
+                bbox_inches="tight",
+            )
         return payload
 
     def discard(self, fig: Any) -> None:
-        """Forget metadata for a figure that is intentionally not exported."""
-        self._metadata.pop(id(fig), None)
+        """Decorate a displayed figure even when file export is disabled."""
+        pending = self._metadata.pop(id(fig), _PendingFigureMetadata())
+        self._decorate_for_display(fig, pending)
 
 
 def _register_bundled_fonts() -> None:

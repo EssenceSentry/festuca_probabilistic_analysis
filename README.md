@@ -1,109 +1,106 @@
 # Análisis de festuca
 
-Este repositorio contiene dos informes ejecutables. El código estadístico vive
-en el paquete `src/festuca_analysis`; los notebooks solo organizan el informe y
-llaman funciones de ese paquete.
+Este repositorio contiene dos notebooks ejecutables y un paquete Python común:
 
-## Uso recomendado
+- `festuca_estudio_longitudinal.ipynb`: análisis descriptivo, DBCA por fecha,
+  diagnósticos, sensibilidades y modelos longitudinales clásicos;
+- `festuca_anexo_probabilistico.ipynb`: modelos probabilísticos de rendimiento y
+  de trayectorias longitudinales;
+- `src/festuca_analysis/`: carga, reconstrucción, auditoría, inferencia y
+  exportación compartidas por ambos notebooks.
 
-1. En una terminal, dentro de esta carpeta, ejecutar:
+Los notebooks se entregan **sin ejecutar**. Sus celdas Markdown contienen solo
+matemática, supuestos y lógica analítica. Las observaciones, auditorías,
+resultados y diagnósticos se presentan como `DataFrame`, figuras o artefactos
+regenerados durante la ejecución.
 
-   ```bash
-   uv sync --frozen
-   uv run --frozen jupyter lab
-   ```
+## Fuente de verdad
 
-2. Abrir uno de estos notebooks:
+La única fuente de valores observados es:
 
-   - `festuca_estudio_longitudinal.ipynb`
-   - `festuca_anexo_probabilistico.ipynb`
-
-3. Elegir **Run All**. No es necesario modificar el código del notebook.
-
-Las tablas y figuras se regeneran en carpetas ignoradas por Git:
-
-- `festuca_thesis_analysis_outputs/` y `festuca_thesis_figures/` para el estudio
-  longitudinal;
-- `results/` para el anexo probabilístico.
-
-Las figuras registran automáticamente la copia de Libertinus incluida en el
-paquete, por lo que conservan la misma tipografía sin instalar fuentes en el
-sistema. La licencia OFL se conserva en `src/festuca_analysis/fonts/OFL.txt`.
-El tema compartido usa la paleta `inferno`, conserva un color estable por
-tratamiento y fija espesores distintos para datos, intervalos, referencias y
-grilla. Salvo el gráfico que superpone Secano y Riego en un mismo eje, todos los
-puntos usan el mismo marcador circular.
-
-## Perfiles de exportación de figuras
-
-El análisis longitudinal ofrece dos perfiles sobre la misma construcción de
-cada gráfico:
-
-- `standalone` conserva el formato autónomo con título, subtítulo y nota dentro
-  de un PNG de 300 dpi y un PDF vectorial en `festuca_thesis_figures/`;
-- `thesis` guarda un PDF vectorial limpio y un JSON sidecar con título,
-  subtítulo, pie, notas y metadatos para LaTeX en
-  `festuca_thesis_figures/thesis/`.
-
-Los campos textuales del sidecar usan LaTeX real (`\pm`, `\approx`, `\times`,
-`\cdot`, exponentes y porcentajes escapados), no sustitutos Unicode. El campo
-`text_format` permite comprobarlo programáticamente.
-
-`festuca_estudio_longitudinal.ipynb` usa `thesis` e imprime cada JSON
-inmediatamente antes de la figura correspondiente. La ejecución de terminal
-conserva `standalone` como perfil predeterminado. También puede seleccionarse
-explícitamente desde Python:
-
-```python
-from festuca_analysis import LongitudinalNotebook
-
-analysis = LongitudinalNotebook(
-    figure_profile="thesis",
-    print_figure_json=True,
-)
+```text
+sources/Datos_Ema_Serrana_INN.xlsx
 ```
 
-## Ejecución sin Jupyter
+El análisis no usa CSV generados, resultados históricos ni valores copiados de
+la tesis como entrada. Al cargar el libro se registra su SHA-256 y se construyen
+DataFrames separados para:
 
-Los mismos análisis pueden ejecutarse desde una terminal:
+- mediciones registradas;
+- fórmulas calculadas dentro del XLSX;
+- valores estimados explícitamente en el XLSX;
+- valores derivados nuevamente por el análisis;
+- metadatos de diseño y manejo.
+
+Las magnitudes derivables se reconstruyen desde mediciones primitivas siempre
+que el libro contiene la información necesaria. Las columnas derivadas del
+XLSX se conservan para conciliación, no como autoridad silenciosa. Las
+estimaciones identificadas en la hoja de calidad se mantienen en columnas de
+auditoría y se excluyen del análisis primario de N.
+
+## Instalación y ejecución
+
+El proyecto requiere Python 3.12. Desde la raíz del repositorio:
 
 ```bash
-uv run --frozen festuca-longitudinal
-uv run --frozen festuca-annex
+uv sync
+uv run jupyter lab
 ```
 
-La primera ejecución longitudinal incluye un bootstrap paramétrico reproducible
-de 199 réplicas para las interacciones de biomasa y concentración de N. Para
-validar por separado el muestreador probabilístico personalizado contra PyMC y
-con datos simulados:
+Luego abra y ejecute, en orden, uno de los notebooks. El anexo probabilístico es
+computacionalmente más costoso porque vuelve a muestrear todos los modelos desde
+el XLSX actual.
+
+También existen entradas de terminal:
 
 ```bash
-uv run --frozen festuca-validate-sampler
+uv run festuca-longitudinal
+uv run festuca-annex
 ```
 
-La auditoría se escribe en `results/validation/`.
+No se incluye un `uv.lock` preexistente porque el conjunto de dependencias fue
+corregido. `uv sync` genera uno consistente con el sistema donde se ejecutará el
+análisis.
 
-Para comprobar que los CSV versionados siguen correspondiendo al Excel fuente:
+## Pruebas sin ejecutar los análisis
 
 ```bash
-uv run --frozen festuca-export-workbook --check
+uv run python -m unittest discover -s tests -v
 ```
 
-## Alcance de la reproducción probabilística
+Las pruebas verifican, entre otras cosas:
 
-El modelo A corregido de rendimiento se vuelve a calcular. El modelo A
-longitudinal, el modelo B y el nulo de reconstrucción utilizan los seis resúmenes
-aceptados de la corrida histórica conservados en
-`reference_outputs/legacy_probabilistic_run/`. Esto permite regenerar todas las
-tablas y figuras del anexo sin versionar 49 MB de cadenas, pero no vuelve a
-muestrear esos tres componentes históricos.
+- procedencia y hash del XLSX;
+- lectura del calendario desde la hoja estructurada;
+- identidades de reconstrucción;
+- separación de mediciones y estimaciones;
+- regla dinámica de auditoría de materia seca;
+- selección de ajustes MixedLM convergidos;
+- valor p correcto para asociaciones ajustadas;
+- notebooks sin salidas ni entradas CSV generadas.
 
 ## Jerarquía inferencial
 
-- **Primaria:** rendimiento limpio entre M1–M5.
-- **Secundaria:** trayectorias de biomasa aérea y concentración de N, con
-  bootstrap paramétrico y control FDR por familia.
-- **Apoyo:** N presente en biomasa, INN y componentes derivados.
-- **Exploratoria/sensibilidad:** correlaciones, políticas de materia seca, EAN y
-  productividad aparente del agua. Las dos últimas se resumen sin volver a
-  probar transformaciones deterministas del rendimiento.
+- **Primaria:** rendimiento limpio entre M1–M5 dentro de cada sector.
+- **Contraste adicional:** promedio M1–M5 frente a M0, interpretado como efecto
+  de N experimental adicional, no como comparación con ausencia total de N.
+- **Secundaria:** trayectorias de biomasa y concentración de N.
+- **Apoyo:** N acumulado, INN y componentes derivados.
+- **Exploratoria o sensibilidad:** correlaciones, políticas de materia seca,
+  EAN, productividad aparente del agua y comparación descriptiva entre los dos
+  sectores físicos.
+
+No se estima un efecto causal del riego porque la condición hídrica no está
+replicada mediante múltiples unidades físicas independientes. Tampoco se trata
+el INN como una medición latente independiente: se conserva como transformación
+de biomasa, concentración de N y la curva crítica elegida.
+
+## Salidas
+
+Las salidas se regeneran en carpetas ignoradas por Git:
+
+- `festuca_thesis_analysis_outputs/` y `festuca_thesis_figures/`;
+- `results/` para el anexo probabilístico.
+
+Las figuras usan una fuente instalada por Matplotlib; el repositorio no incluye
+archivos de fuentes.

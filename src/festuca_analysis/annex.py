@@ -1,23 +1,39 @@
+"""Source-reproducible probabilistic annex for the Festuca experiment.
+
+No posterior summaries are imported from historical runs.  Every model reads the
+current XLSX workbook through :mod:`festuca_analysis.source_data`.  The model uses
+observed response centering and scaling for numerical stability; consequently,
+its predictive audit is explicitly labelled conditional/data-scaled rather than
+as a pre-data prior predictive analysis.
+"""
+
 from __future__ import annotations
 
-# Pyright's strict mode remains active. These diagnostics are disabled because the
-# scientific stack used here exposes partially typed NumPy-shaped APIs.
+# Pyright cannot fully infer the scientific stack's labelled-array APIs.
 # pyright: reportMissingTypeStubs=false
 # pyright: reportUnknownArgumentType=false, reportUnknownMemberType=false
 # pyright: reportUnknownVariableType=false
+import json
+import platform
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Final, Literal, cast
 
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pymc as pm
+import pytensor.tensor as pt
+import scipy
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
 import xarray as xr
-from matplotlib.figure import Figure
+from IPython.display import display
+from patsy import build_design_matrices, dmatrix
+from scipy import stats
 from scipy.linalg import helmert
-from scipy.stats import f as f_dist
-from scipy.stats import geninvgauss
 
 from festuca_analysis.plotting import (
     DATA_LINEWIDTH,
@@ -27,561 +43,136 @@ from festuca_analysis.plotting import (
     MARKER_SIZE,
     REFERENCE_LINEWIDTH,
     SECONDARY_LINEWIDTH,
-    add_figure_header,
-    add_figure_note,
+    FigureExporter,
     apply_plot_theme,
     plot_horizontal_interval,
 )
+from festuca_analysis.source_data import (
+    ExperimentData,
+    load_experiment_data,
+    source_provenance_table,
+)
 
-RANDOM_SEED = 20260807
-TREATMENTS = [f"M{i}" for i in range(6)]
-FERTILIZED = TREATMENTS[1:]
-SECTORS = ["Secano", "Riego"]
-DATES = ["Sep", "Oct", "Nov"]
+pt_api = cast(Any, pt)
 
-STUDENT_T_DF = 5.0
-INTERCEPT_PRIOR_SD = 1.5
-EXTRA_N_PRIOR_SD = 2.0
-BLOCK_PRIOR_SD = 0.75
-SIGMA2_PRIOR_SHAPE = 2.0
-SIGMA2_PRIOR_SCALE = 0.5
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-WORKBOOK = PROJECT_ROOT / "sources" / "Datos_Ema_Serrana_INN.xlsx"
-REFERENCE_TABLES = PROJECT_ROOT / "reference_outputs" / "legacy_probabilistic_run"
-OUT = PROJECT_ROOT / "results"
-TABLES = OUT / "tables"
-FIGURES = OUT / "figures"
-POSTERIORS = OUT / "posteriors"
-for path in (TABLES, FIGURES, POSTERIORS):
-    path.mkdir(parents=True, exist_ok=True)
-
-
-# -----------------------------------------------------------------------------
-# Data
-# -----------------------------------------------------------------------------
+PROJECT_ROOT: Final = Path(__file__).resolve().parents[2]
+DEFAULT_RESULTS_DIR: Final = PROJECT_ROOT / "results"
+RANDOM_SEED: Final = 20260807
+STUDENT_T_DF: Final = 5.0
+PRIMARY_TIMING_PRIOR_SCALE: Final = 0.50
+TIMING_PRIOR_SCALES: Final = {
+    "strong_regularization": 0.25,
+    "primary": PRIMARY_TIMING_PRIOR_SCALE,
+    "weak_regularization": 1.00,
+}
+PROBABILISTIC_FIGURE_STEMS: Final = (
+    "01_yield_observed_posterior",
+    "02_margin_prior_sensitivity",
+    "03_posterior_predictive_anova",
+    "longitudinal_biomass_kg_ha_raw",
+    "longitudinal_n_pct_raw",
+    "reconstruction_null",
+)
 
 
-def load_yield_data() -> pd.DataFrame:
-    data = pd.read_excel(WORKBOOK, sheet_name="Datos_Rto", header=4)
-    data = data.rename(
-        columns={
-            "Condición": "sector",
-            "Tratamiento": "treatment",
-            "Repetición": "block",
-            "Peso limpio": "clean_seed_g",
-        }
-    )
-    data = data.loc[data["treatment"].isin(TREATMENTS)].copy()
-    for column in ["sector", "treatment", "block"]:
-        data[column] = data[column].astype("string").str.strip()
-    data["clean_yield_kg_ha"] = data["clean_seed_g"].astype(float) * 10.0 / 0.76
-    data["sector"] = pd.Categorical(data["sector"], SECTORS, ordered=True)
-    data["treatment"] = pd.Categorical(data["treatment"], TREATMENTS, ordered=True)
-    block_levels = sorted(data["block"].dropna().unique().tolist())
-    data["block"] = pd.Categorical(data["block"], block_levels, ordered=True)
-    return data[["sector", "block", "treatment", "clean_yield_kg_ha"]].reset_index(
-        drop=True
-    )
-
-
-# -----------------------------------------------------------------------------
-# Corrected Model A: robust raw-scale yield model
-# -----------------------------------------------------------------------------
-
-
-@dataclass
-class Design:
-    X: np.ndarray
-    X_group: np.ndarray
-    y_z: np.ndarray
+@dataclass(frozen=True)
+class YieldDesign:
+    frame: pd.DataFrame
     center: float
     scale: float
+    extra_n: np.ndarray
+    timing: np.ndarray
+    block: np.ndarray
+    group_timing: np.ndarray
+    treatments: tuple[str, ...]
+    blocks: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class LongitudinalDesign:
     frame: pd.DataFrame
-    timing_slice: slice
-    block_slice: slice
+    center: float
+    scale: float
+    response_scale: Literal["raw", "log"]
+    fixed_formula: str
+    design_info: Any
+    x_main: np.ndarray
+    x_interaction: np.ndarray
+    main_names: tuple[str, ...]
+    interaction_names: tuple[str, ...]
+    plot_index: np.ndarray
+    plots: tuple[str, ...]
+    prediction_grid: pd.DataFrame
+    prediction_main: np.ndarray
+    prediction_interaction: np.ndarray
+    treatments: tuple[str, ...]
+    date_levels: tuple[str, ...]
+    blocks: tuple[str, ...]
 
 
-def make_design(frame: pd.DataFrame) -> Design:
-    frame = frame.reset_index(drop=True).copy()
-    y = frame["clean_yield_kg_ha"].to_numpy(float)
-    center = float(y.mean())
-    scale = float(y.std(ddof=1))
-    y_z = (y - center) / scale
-
-    treatment_idx = pd.Categorical(
-        frame["treatment"].astype(str), categories=TREATMENTS, ordered=True
-    ).codes
-    present_blocks = sorted(frame["block"].astype(str).unique().tolist())
-    block_idx = pd.Categorical(
-        frame["block"].astype(str), categories=present_blocks, ordered=True
-    ).codes
-
-    timing_basis = helmert(5, full=False).T  # 5 x 4, orthonormal and sum-to-zero
-    block_basis = (
-        helmert(len(present_blocks), full=False).T
-        if len(present_blocks) > 1
-        else np.zeros((1, 0))
-    )
-
-    extra_n = (treatment_idx > 0).astype(float)
-    timing = np.zeros((len(frame), 4))
-    fertilized_mask = treatment_idx > 0
-    timing[fertilized_mask] = timing_basis[treatment_idx[fertilized_mask] - 1]
-    block = block_basis[block_idx]
-
-    X = np.column_stack([np.ones(len(frame)), extra_n, timing, block])
-    timing_slice = slice(2, 6)
-    block_slice = slice(6, X.shape[1])
-
-    # Expected response by treatment at the average block effect.
-    X_group = np.zeros((6, X.shape[1]))
-    X_group[:, 0] = 1.0
-    X_group[1:, 1] = 1.0
-    X_group[1:, timing_slice] = timing_basis
-
-    return Design(
-        X=X,
-        X_group=X_group,
-        y_z=y_z,
-        center=center,
-        scale=scale,
-        frame=frame,
-        timing_slice=timing_slice,
-        block_slice=block_slice,
-    )
+@dataclass(frozen=True)
+class FittedModel:
+    model_id: str
+    sector: str
+    outcome: str
+    specification: str
+    inference_data: az.InferenceData
+    design: YieldDesign | LongitudinalDesign
 
 
-def logp_log_tau(log_tau: float, coefficients: np.ndarray, prior_scale: float) -> float:
-    """Conditional log-density of log(tau) under Normal coefficients + HalfNormal tau."""
-    tau = np.exp(log_tau)
-    q = len(coefficients)
-    sum_squares = float(coefficients @ coefficients)
-    return (
-        -(q - 1) * log_tau
-        - sum_squares / (2.0 * tau**2)
-        - tau**2 / (2.0 * prior_scale**2)
-    )
+def _stable_seed(*parts: object, base: int = RANDOM_SEED) -> int:
+    payload = "|".join(str(part) for part in parts).encode("utf-8")
+    return base + zlib.crc32(payload) % 1_000_000
 
 
-def prior_specification_table() -> pd.DataFrame:
-    """Return the complete numerical prior specification on the z scale."""
-    return pd.DataFrame(
-        [
-            {
-                "parameter": "Intercepto",
-                "prior": f"Normal(0, {INTERCEPT_PRIOR_SD})",
-                "scale": "respuesta estandarizada",
-                "role": "media general",
-            },
-            {
-                "parameter": "N adicional (M1–M5 vs M0)",
-                "prior": f"Normal(0, {EXTRA_N_PRIOR_SD})",
-                "scale": "respuesta estandarizada",
-                "role": "contraste planificado",
-            },
-            {
-                "parameter": "Contrastes M1–M5",
-                "prior": "Normal(0, tau_timing)",
-                "scale": "respuesta estandarizada",
-                "role": "regularización jerárquica",
-            },
-            {
-                "parameter": "tau_timing",
-                "prior": "HalfNormal(0.25 / 0.50 / 1.00)",
-                "scale": "respuesta estandarizada",
-                "role": "sensibilidad de regularización",
-            },
-            {
-                "parameter": "Bloques",
-                "prior": f"Normal(0, {BLOCK_PRIOR_SD})",
-                "scale": "respuesta estandarizada",
-                "role": "contrastes ortonormales",
-            },
-            {
-                "parameter": "sigma^2",
-                "prior": (f"InverseGamma({SIGMA2_PRIOR_SHAPE}, {SIGMA2_PRIOR_SCALE})"),
-                "scale": "respuesta estandarizada",
-                "role": "varianza residual",
-            },
-            {
-                "parameter": "y",
-                "prior": f"Student-t(nu={int(STUDENT_T_DF)}, mu, sigma)",
-                "scale": "kg ha^-1 tras desestandarizar",
-                "role": "verosimilitud robusta",
-            },
-        ]
-    )
+def _flatten_posterior(data: xr.DataArray) -> np.ndarray:
+    stacked = data.stack(sample=("chain", "draw"))
+    remaining = [dimension for dimension in stacked.dims if dimension != "sample"]
+    ordered = stacked.transpose("sample", *remaining)
+    return np.asarray(ordered)
 
 
-def prior_predictive_summary(
-    frame: pd.DataFrame,
-    *,
-    timing_prior_scale: float,
-    draws: int = 20000,
-    seed: int = RANDOM_SEED,
-) -> pd.DataFrame:
-    """Simulate prior predictions and summarize their agronomic plausibility."""
-    design = make_design(frame)
-    rng = np.random.default_rng(seed)
-    coefficient_draws = np.zeros((draws, design.X.shape[1]))
-    coefficient_draws[:, 0] = rng.normal(0.0, INTERCEPT_PRIOR_SD, draws)
-    coefficient_draws[:, 1] = rng.normal(0.0, EXTRA_N_PRIOR_SD, draws)
-    tau = np.abs(rng.normal(0.0, timing_prior_scale, draws))
-    coefficient_draws[:, design.timing_slice] = rng.normal(
-        0.0,
-        tau[:, None],
-        (draws, design.timing_slice.stop - design.timing_slice.start),
-    )
-    if design.block_slice.stop > design.block_slice.start:
-        coefficient_draws[:, design.block_slice] = rng.normal(
-            0.0,
-            BLOCK_PRIOR_SD,
-            (draws, design.block_slice.stop - design.block_slice.start),
-        )
-    group_z = coefficient_draws @ design.X_group.T
-    group_means = design.center + design.scale * group_z
-    sigma2 = 1.0 / rng.gamma(
-        SIGMA2_PRIOR_SHAPE,
-        1.0 / SIGMA2_PRIOR_SCALE,
-        draws,
-    )
-    replicated = group_means + design.scale * np.sqrt(sigma2)[:, None] * rng.standard_t(
-        STUDENT_T_DF,
-        size=group_means.shape,
-    )
-    fertilized_range = np.ptp(group_means[:, 1:], axis=1)
-    return pd.DataFrame(
-        [
-            {
-                "timing_prior_scale": timing_prior_scale,
-                "draws": draws,
-                "mean_lower_95": float(np.quantile(group_means, 0.025)),
-                "mean_upper_95": float(np.quantile(group_means, 0.975)),
-                "p_any_treatment_mean_below_zero": float(
-                    np.mean(np.any(group_means < 0.0, axis=1))
-                ),
-                "p_replicated_yield_below_zero": float(np.mean(replicated < 0.0)),
-                "p_replicated_yield_above_3000": float(np.mean(replicated > 3000.0)),
-                "median_prior_range_m1_m5": float(np.median(fertilized_range)),
-                "range_upper_95_m1_m5": float(np.quantile(fertilized_range, 0.95)),
-            }
-        ]
-    )
-
-
-def sample_hierarchical_yield(
-    frame: pd.DataFrame,
-    timing_prior_scale: float,
-    *,
-    chains: int = 4,
-    iterations: int = 14000,
-    burn: int = 3000,
-    thin: int = 3,
-    seed: int = RANDOM_SEED,
-) -> tuple[Design, dict[str, np.ndarray], dict[str, float]]:
-    """Gibbs sampler for a robust Student-t RCBD yield model.
-
-    The response is standardized internally. Student-t(df=5) is represented as a
-    Normal-Gamma scale mixture. The timing variance has a HalfNormal prior and its
-    squared scale is sampled exactly from a generalized inverse-Gaussian full
-    conditional. Because df > 1, the Student-t location is an arithmetic mean.
-    """
-    design = make_design(frame)
-    n, p = design.X.shape
-    X_t = design.X.T
-    n_keep = len(range(burn, iterations, thin))
-
-    beta_draws = np.empty((chains, n_keep, p))
-    sigma_draws = np.empty((chains, n_keep))
-    tau_draws = np.empty((chains, n_keep))
-
-    nu = STUDENT_T_DF
-    a0 = SIGMA2_PRIOR_SHAPE
-    b0 = SIGMA2_PRIOR_SCALE
-    fixed_precision = np.zeros(p)
-    fixed_precision[0] = 1.0 / INTERCEPT_PRIOR_SD**2
-    fixed_precision[1] = 1.0 / EXTRA_N_PRIOR_SD**2
-    if design.block_slice.stop > design.block_slice.start:
-        fixed_precision[design.block_slice] = 1.0 / BLOCK_PRIOR_SD**2
-
-    q_timing = design.timing_slice.stop - design.timing_slice.start
-    gig_p = (1.0 - q_timing) / 2.0
-    gig_a = 1.0 / timing_prior_scale**2
-
-    for chain in range(chains):
-        rng = np.random.default_rng(seed + 1000 * chain)
-        beta = np.linalg.lstsq(design.X, design.y_z, rcond=None)[0]
-        sigma2 = max(float(np.var(design.y_z - design.X @ beta)), 0.05)
-        local_precision = np.ones(n)
-        tau = 0.15
-        stored = 0
-
-        for iteration in range(iterations):
-            prior_precision = fixed_precision.copy()
-            prior_precision[design.timing_slice] = 1.0 / tau**2
-
-            precision = (X_t * local_precision) @ design.X / sigma2 + np.diag(
-                prior_precision
-            )
-            chol = np.linalg.cholesky(precision)
-            rhs = (X_t * local_precision) @ design.y_z / sigma2
-            posterior_mean = np.linalg.solve(chol.T, np.linalg.solve(chol, rhs))
-            beta = posterior_mean + np.linalg.solve(chol.T, rng.standard_normal(p))
-
-            # Exact update for tau^2 under Normal coefficients and HalfNormal(tau).
-            sum_squares = max(
-                float(beta[design.timing_slice] @ beta[design.timing_slice]), 1e-12
-            )
-            gig_b = sum_squares
-            symmetric_parameter = np.sqrt(gig_a * gig_b)
-            scale_factor = np.sqrt(gig_b / gig_a)
-            tau2 = scale_factor * geninvgauss.rvs(
-                gig_p,
-                symmetric_parameter,
-                random_state=rng,
-            )
-            tau = np.sqrt(max(float(tau2), 1e-12))
-
-            residual = design.y_z - design.X @ beta
-            rate = (nu + residual**2 / sigma2) / 2.0
-            local_precision = rng.gamma((nu + 1.0) / 2.0, 1.0 / rate)
-            posterior_shape = a0 + n / 2.0
-            posterior_scale = b0 + 0.5 * np.sum(local_precision * residual**2)
-            sigma2 = 1.0 / rng.gamma(posterior_shape, 1.0 / posterior_scale)
-
-            if iteration >= burn and (iteration - burn) % thin == 0:
-                beta_draws[chain, stored] = beta
-                sigma_draws[chain, stored] = np.sqrt(sigma2)
-                tau_draws[chain, stored] = tau
-                stored += 1
-
-    group_z = np.einsum("gp,cdp->cdg", design.X_group, beta_draws)
-    mean_yield = design.center + design.scale * group_z
-    mu_obs = design.center + design.scale * np.einsum(
-        "np,cdp->cdn", design.X, beta_draws
-    )
-    sigma_yield = design.scale * sigma_draws
-
-    samples = {
-        "beta": beta_draws,
-        "sigma_z": sigma_draws,
-        "tau_timing": tau_draws,
-        "mean_yield": mean_yield,
-        "mu_obs": mu_obs,
-        "sigma_yield": sigma_yield,
-    }
-    metadata = {"center": design.center, "scale": design.scale}
-    return design, samples, metadata
-
-
-def sample_fixed_yield(
-    frame: pd.DataFrame,
-    timing_sd: float = 3.0,
-    *,
-    chains: int = 4,
-    iterations: int = 20000,
-    burn: int = 4000,
-    thin: int = 4,
-    seed: int = RANDOM_SEED,
-) -> tuple[Design, dict[str, np.ndarray], dict[str, float]]:
-    """Nearly unpooled sensitivity model with a fixed, very wide timing prior."""
-    design = make_design(frame)
-    n, p = design.X.shape
-    X_t = design.X.T
-    n_keep = len(range(burn, iterations, thin))
-
-    beta_draws = np.empty((chains, n_keep, p))
-    sigma_draws = np.empty((chains, n_keep))
-
-    prior_sd = np.full(p, 1.0)
-    prior_sd[0] = INTERCEPT_PRIOR_SD
-    prior_sd[1] = EXTRA_N_PRIOR_SD
-    prior_sd[design.timing_slice] = timing_sd
-    prior_sd[design.block_slice] = BLOCK_PRIOR_SD
-    prior_precision = np.diag(1.0 / prior_sd**2)
-
-    nu = STUDENT_T_DF
-    a0 = SIGMA2_PRIOR_SHAPE
-    b0 = SIGMA2_PRIOR_SCALE
-
-    for chain in range(chains):
-        rng = np.random.default_rng(seed + 1000 * chain)
-        beta = np.linalg.lstsq(design.X, design.y_z, rcond=None)[0]
-        sigma2 = max(float(np.var(design.y_z - design.X @ beta)), 0.05)
-        local_precision = np.ones(n)
-        stored = 0
-
-        for iteration in range(iterations):
-            precision = (X_t * local_precision) @ design.X / sigma2 + prior_precision
-            chol = np.linalg.cholesky(precision)
-            rhs = (X_t * local_precision) @ design.y_z / sigma2
-            posterior_mean = np.linalg.solve(chol.T, np.linalg.solve(chol, rhs))
-            beta = posterior_mean + np.linalg.solve(chol.T, rng.standard_normal(p))
-
-            residual = design.y_z - design.X @ beta
-            rate = (nu + residual**2 / sigma2) / 2.0
-            local_precision = rng.gamma((nu + 1.0) / 2.0, 1.0 / rate)
-            posterior_shape = a0 + n / 2.0
-            posterior_scale = b0 + 0.5 * np.sum(local_precision * residual**2)
-            sigma2 = 1.0 / rng.gamma(posterior_shape, 1.0 / posterior_scale)
-
-            if iteration >= burn and (iteration - burn) % thin == 0:
-                beta_draws[chain, stored] = beta
-                sigma_draws[chain, stored] = np.sqrt(sigma2)
-                stored += 1
-
-    group_z = np.einsum("gp,cdp->cdg", design.X_group, beta_draws)
-    mean_yield = design.center + design.scale * group_z
-    mu_obs = design.center + design.scale * np.einsum(
-        "np,cdp->cdn", design.X, beta_draws
-    )
-    sigma_yield = design.scale * sigma_draws
-    samples = {
-        "beta": beta_draws,
-        "sigma_z": sigma_draws,
-        "mean_yield": mean_yield,
-        "mu_obs": mu_obs,
-        "sigma_yield": sigma_yield,
-    }
-    return design, samples, {"center": design.center, "scale": design.scale}
-
-
-def convergence_diagnostics(samples: dict[str, np.ndarray]) -> dict[str, float]:
-    selected = {
-        key: value
-        for key, value in samples.items()
-        if key in {"beta", "sigma_z", "tau_timing", "mean_yield"}
-    }
-    data_vars: dict[str, Any] = {}
-    for key, value in selected.items():
-        dimensions = ["chain", "draw"] + [
-            f"{key}_dim_{index}" for index in range(value.ndim - 2)
-        ]
-        data_vars[key] = (dimensions, value)
-    dataset = xr.Dataset(data_vars)
-    rhat = cast(Any, az.rhat(dataset))
-    ess = cast(Any, az.ess(dataset))
+def _quantile_summary(values: np.ndarray) -> dict[str, float]:
+    array = np.asarray(values, dtype=float)
     return {
-        "max_rhat": max(
-            float(np.nanmax(variable.values)) for variable in rhat.data_vars.values()
-        ),
-        "min_ess_bulk": min(
-            float(np.nanmin(variable.values)) for variable in ess.data_vars.values()
-        ),
+        "posterior_mean": float(np.mean(array)),
+        "median": float(np.median(array)),
+        "lower_95": float(np.quantile(array, 0.025)),
+        "upper_95": float(np.quantile(array, 0.975)),
     }
 
 
-def flatten(samples: dict[str, np.ndarray], variable: str) -> np.ndarray:
-    value = samples[variable]
-    return value.reshape((-1,) + value.shape[2:])
-
-
-def summarize_yield_draws(
-    sector: str,
-    specification: str,
-    samples: dict[str, np.ndarray],
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    means = flatten(samples, "mean_yield")
-    fertilized = means[:, 1:]
-    spread = np.ptp(fertilized, axis=1)
-    early_late = fertilized[:, :2].mean(axis=1) - fertilized[:, 3:5].mean(axis=1)
-    m5_vs_others = fertilized[:, 4] - fertilized[:, :4].mean(axis=1)
-    extra_n = fertilized.mean(axis=1) - means[:, 0]
-    best = np.argmax(fertilized, axis=1)
-    worst = np.argmin(fertilized, axis=1)
-
-    treatment_rows = []
-    for index, treatment in enumerate(TREATMENTS):
-        values = means[:, index]
-        treatment_rows.append(
-            {
-                "sector": sector,
-                "specification": specification,
-                "treatment": treatment,
-                "posterior_mean": float(values.mean()),
-                "median": float(np.median(values)),
-                "lower_95": float(np.quantile(values, 0.025)),
-                "upper_95": float(np.quantile(values, 0.975)),
-            }
-        )
-
-    estimand_rows = []
-    estimands = {
-        "Promedio M1–M5 menos M0": extra_n,
-        "M1–M2 menos M4–M5": early_late,
-        "M5 menos promedio M1–M4": m5_vs_others,
-        "Rango máximo M1–M5": spread,
-    }
-    for name, values in estimands.items():
-        estimand_rows.append(
-            {
-                "sector": sector,
-                "specification": specification,
-                "estimand": name,
-                "posterior_mean": float(values.mean()),
-                "median": float(np.median(values)),
-                "lower_95": float(np.quantile(values, 0.025)),
-                "upper_95": float(np.quantile(values, 0.975)),
-                "p_gt_0": float(np.mean(values > 0.0)),
-                "p_abs_gt_100": float(np.mean(np.abs(values) > 100.0)),
-            }
-        )
-
-    rank_rows = []
-    for index, treatment in enumerate(FERTILIZED):
-        rank_rows.append(
-            {
-                "sector": sector,
-                "specification": specification,
-                "treatment": treatment,
-                "p_best": float(np.mean(best == index)),
-                "p_worst": float(np.mean(worst == index)),
-                "p_within_50_best": float(
-                    np.mean(fertilized[:, index] >= fertilized.max(axis=1) - 50.0)
-                ),
-                "p_within_100_best": float(
-                    np.mean(fertilized[:, index] >= fertilized.max(axis=1) - 100.0)
-                ),
-                "p_within_150_best": float(
-                    np.mean(fertilized[:, index] >= fertilized.max(axis=1) - 150.0)
-                ),
-            }
-        )
-
-    margin_rows = []
-    for margin in np.arange(0.0, 301.0, 5.0):
-        margin_rows.append(
-            {
-                "sector": sector,
-                "specification": specification,
-                "margin_kg_ha": margin,
-                "p_range_gt_margin": float(np.mean(spread > margin)),
-                "p_all_within_margin": float(np.mean(spread <= margin)),
-            }
-        )
-
-    return (
-        pd.DataFrame(treatment_rows),
-        pd.DataFrame(estimand_rows),
-        pd.DataFrame(rank_rows),
-        pd.DataFrame(margin_rows),
+def _observed_rcbd_p(frame: pd.DataFrame) -> float:
+    subset = frame.loc[frame["treatment"].astype(str).ne("M0")].copy()
+    subset = subset.assign(
+        treatment=subset["treatment"].astype(str),
+        block=subset["block"].astype(str),
     )
+    fit = smf.ols(
+        "clean_yield_kg_ha ~ C(treatment) + C(block)",
+        data=subset,
+    ).fit()
+    anova = sm.stats.anova_lm(fit, typ=2)
+    row = next(name for name in anova.index if str(name).startswith("C(treatment)"))
+    return float(cast(Any, anova.loc[row, "PR(>F)"]))
 
 
-def rcbd_anova_p_values(
-    y_rep: np.ndarray, treatment: np.ndarray, block: np.ndarray
+def _rcbd_anova_p_values(
+    y_rep: np.ndarray,
+    treatment: np.ndarray,
+    block: np.ndarray,
 ) -> np.ndarray:
-    """Vectorized treatment F-test for M1-M5 RCBD replicated datasets."""
-    mask = np.isin(treatment, FERTILIZED)
+    """Vectorized M1–M5 block-adjusted treatment F tests."""
+
+    fertilized = [f"M{i}" for i in range(1, 6)]
+    mask = np.isin(treatment, fertilized)
     treatment_sub = treatment[mask]
     block_sub = block[mask]
     y_sub = y_rep[:, mask]
 
-    treatment_levels = FERTILIZED
     block_levels = sorted(np.unique(block_sub).tolist())
     treatment_dummy = np.column_stack(
-        [(treatment_sub == level).astype(float) for level in treatment_levels[1:]]
+        [(treatment_sub == level).astype(float) for level in fertilized[1:]]
     )
     block_dummy = np.column_stack(
         [(block_sub == level).astype(float) for level in block_levels[1:]]
@@ -590,981 +181,1699 @@ def rcbd_anova_p_values(
     x_full = np.column_stack([intercept, treatment_dummy, block_dummy])
     x_reduced = np.column_stack([intercept, block_dummy])
 
-    h_full = x_full @ np.linalg.pinv(x_full)
-    h_reduced = x_reduced @ np.linalg.pinv(x_reduced)
-    residual_full = y_sub @ (np.eye(len(treatment_sub)) - h_full)
-    residual_reduced = y_sub @ (np.eye(len(treatment_sub)) - h_reduced)
-    sse_full = np.sum(residual_full**2, axis=1)
-    sse_reduced = np.sum(residual_reduced**2, axis=1)
-
+    residual_projection_full = np.eye(len(treatment_sub)) - x_full @ np.linalg.pinv(
+        x_full
+    )
+    residual_projection_reduced = np.eye(
+        len(treatment_sub)
+    ) - x_reduced @ np.linalg.pinv(x_reduced)
+    sse_full = np.sum((y_sub @ residual_projection_full) ** 2, axis=1)
+    sse_reduced = np.sum((y_sub @ residual_projection_reduced) ** 2, axis=1)
     df_num = x_full.shape[1] - x_reduced.shape[1]
     df_den = len(treatment_sub) - x_full.shape[1]
-    f_values = ((sse_reduced - sse_full) / df_num) / (sse_full / df_den)
-    f_values = np.maximum(f_values, 0.0)
-    return f_dist.sf(f_values, df_num, df_den)
-
-
-def posterior_predictive_summary(
-    sector: str,
-    design: Design,
-    samples: dict[str, np.ndarray],
-    observed_p: float,
-    n_replications: int = 5000,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    rng = np.random.default_rng(RANDOM_SEED + (0 if sector == "Secano" else 1000))
-    means = flatten(samples, "mean_yield")
-    mu_obs = flatten(samples, "mu_obs")
-    sigma = flatten(samples, "sigma_yield")
-    n_posterior = len(means)
-    selected = rng.choice(
-        n_posterior, size=min(n_replications, n_posterior), replace=False
+    f_values = np.maximum(
+        ((sse_reduced - sse_full) / df_num) / (sse_full / df_den),
+        0.0,
     )
-    residuals = rng.standard_t(df=5, size=(len(selected), len(design.frame)))
-    y_rep = mu_obs[selected] + sigma[selected, None] * residuals
-
-    p_values = rcbd_anova_p_values(
-        y_rep,
-        design.frame["treatment"].astype(str).to_numpy(),
-        design.frame["block"].astype(str).to_numpy(),
-    )
-    latent_spread = np.ptp(means[selected, 1:], axis=1)
-    treatment_idx = pd.Categorical(
-        design.frame["treatment"].astype(str), TREATMENTS, ordered=True
-    ).codes
-    replicated_means = np.column_stack(
-        [y_rep[:, treatment_idx == index].mean(axis=1) for index in range(6)]
-    )
-
-    summary = pd.DataFrame(
-        [
-            {
-                "sector": sector,
-                "observed_p_m1_m5": observed_p,
-                "p_rep_anova_non_significant": float(np.mean(p_values > 0.05)),
-                "p_rep_anova_p_le_observed": float(np.mean(p_values <= observed_p)),
-                "p_latent_range_gt_100": float(np.mean(latent_spread > 100.0)),
-                "p_non_significant_given_range_gt_100": float(
-                    np.mean(p_values[latent_spread > 100.0] > 0.05)
-                    if np.any(latent_spread > 100.0)
-                    else np.nan
-                ),
-                "p_m5_last_in_replication": float(
-                    np.mean(np.argmin(replicated_means[:, 1:], axis=1) == 4)
-                ),
-                "n_replications": len(selected),
-            }
-        ]
-    )
-    draws = pd.DataFrame(
-        {
-            "sector": sector,
-            "p_value_m1_m5": p_values,
-            "latent_range_m1_m5": latent_spread,
-        }
-    )
-    return summary, draws
+    return stats.f.sf(f_values, df_num, df_den)
 
 
-# -----------------------------------------------------------------------------
-# Accepted summaries from the original probabilistic run
-# -----------------------------------------------------------------------------
+class ProbabilisticAnnex:
+    """Notebook-facing controller for all source-reproducible Bayesian analyses."""
 
-
-def load_legacy_table(filename: str) -> pd.DataFrame:
-    """Load a compact accepted summary from the preserved probabilistic run."""
-    path = REFERENCE_TABLES / filename
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"No se encontró el insumo de referencia {path}. "
-            "Consulte reference_outputs/legacy_probabilistic_run/README.md."
+    def __init__(
+        self,
+        *,
+        project_root: Path | None = None,
+        workbook_path: Path | str | None = None,
+        draws: int = 2000,
+        tune: int = 2000,
+        chains: int = 4,
+        cores: int | None = None,
+        target_accept: float = 0.95,
+        random_seed: int = RANDOM_SEED,
+        export_results: bool = True,
+        export_figures: bool = True,
+        figure_profile: Literal["standalone", "thesis"] = "thesis",
+        print_figure_json: bool = False,
+    ) -> None:
+        self.project_root = (project_root or PROJECT_ROOT).resolve()
+        self.workbook_path = workbook_path
+        self.draws = draws
+        self.tune = tune
+        self.chains = chains
+        self.cores = cores
+        self.target_accept = target_accept
+        self.random_seed = random_seed
+        self.export_results = export_results
+        self.export_figures = export_figures
+        self.results_dir = self.project_root / DEFAULT_RESULTS_DIR.name
+        self.tables_dir = self.results_dir / "tables"
+        self.figures_dir = self.results_dir / "figures"
+        self.posteriors_dir = self.results_dir / "posteriors"
+        self.data: ExperimentData | None = None
+        self.tables: dict[str, pd.DataFrame] = {}
+        self.figure_metadata: list[dict[str, object]] = []
+        self.yield_models: dict[str, FittedModel] = {}
+        self.longitudinal_models: dict[str, FittedModel] = {}
+        self.palette = apply_plot_theme()
+        self.figure_exporter = FigureExporter(
+            self.figures_dir,
+            profile=figure_profile,
+            dpi=300,
+            print_json=print_figure_json,
         )
-    return pd.read_csv(path)
+        pd.set_option("display.max_columns", 100)
+        pd.set_option("display.width", 180)
 
+    def _require_data(self) -> ExperimentData:
+        if self.data is None:
+            raise RuntimeError("Ejecute annex.load_data() antes de esta sección.")
+        return self.data
 
-def summarize_longitudinal_model_a() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load the accepted Model A summaries without shipping 49 MB of chains."""
-    return (
-        load_legacy_table("model_a_longitudinal_trajectories.csv"),
-        load_legacy_table("model_a_longitudinal_contrasts.csv"),
-    )
+    def _show(self, name: str, frame: pd.DataFrame) -> pd.DataFrame:
+        table = frame.copy()
+        self.tables[name] = table
+        display(table)
+        return table
 
+    def _save_figure(
+        self,
+        fig: Any,
+        stem: str,
+        *,
+        title: str,
+        subtitle: str | None = None,
+        note: str | None = None,
+    ) -> None:
+        self.figure_exporter.add_header(fig, title, subtitle=subtitle)
+        if note:
+            self.figure_exporter.add_note(fig, note)
+        if self.export_figures:
+            payload = self.figure_exporter.save(fig, stem)
+            self.figure_metadata.append(payload)
+        else:
+            self.figure_exporter.discard(fig)
+        plt.show()
+        plt.close(fig)
 
-# -----------------------------------------------------------------------------
-# Execution
-# -----------------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Configuration and source
+    # ------------------------------------------------------------------
 
+    def configuration(self) -> pd.DataFrame:
+        frame = pd.DataFrame(
+            [
+                ("Python", platform.python_version()),
+                ("pymc", pm.__version__),
+                ("arviz", az.__version__),
+                ("numpy", np.__version__),
+                ("scipy", scipy.__version__),
+                ("draws", self.draws),
+                ("tune", self.tune),
+                ("chains", self.chains),
+                ("cores", self.cores if self.cores is not None else "PyMC default"),
+                ("target_accept", self.target_accept),
+                ("random_seed", self.random_seed),
+            ],
+            columns=["setting", "value"],
+        )
+        return self._show("probabilistic_configuration", frame)
 
-def run_all() -> None:
-    yield_data = load_yield_data()
-    specifications = {
-        "Regularización fuerte": ("hierarchical", 0.25),
-        "Principal": ("hierarchical", 0.50),
-        "Regularización débil": ("hierarchical", 1.00),
-        "Casi no agrupado": ("fixed", 3.00),
-    }
+    def load_data(self) -> pd.DataFrame:
+        self.data = load_experiment_data(
+            self.workbook_path,
+            project_root=self.project_root,
+            dry_matter_policy="recorded",
+            include_estimated_quality=False,
+        )
+        return self._show("probabilistic_source_qa", self.data.qa)
 
-    treatment_tables = []
-    estimand_tables = []
-    rank_tables = []
-    margin_tables = []
-    diagnostic_rows = []
-    primary: dict[str, tuple[Design, dict[str, np.ndarray]]] = {}
+    def source_provenance(self) -> pd.DataFrame:
+        return self._show(
+            "probabilistic_source_provenance",
+            source_provenance_table(self._require_data()),
+        )
 
-    prior_table = prior_specification_table()
-    prior_predictive_rows: list[pd.DataFrame] = []
-    for sector_index, sector in enumerate(SECTORS):
-        sector_frame = yield_data.loc[
-            yield_data["sector"].astype(str).eq(sector)
+    def source_audit(self) -> pd.DataFrame:
+        return self._show(
+            "probabilistic_source_audit",
+            self._require_data().spec.source_audit,
+        )
+
+    def variable_lineage(self) -> pd.DataFrame:
+        return self._show(
+            "probabilistic_variable_lineage",
+            self._require_data().variable_lineage,
+        )
+
+    def model_specification(self) -> pd.DataFrame:
+        rows = [
+            {
+                "model": "yield",
+                "component": "response",
+                "specification": "Student-t",
+                "parameter": f"nu={STUDENT_T_DF:g}",
+                "scale": "standardized within sector",
+            },
+            {
+                "model": "yield",
+                "component": "intercept",
+                "specification": "Normal",
+                "parameter": "sd=1.5",
+                "scale": "standardized",
+            },
+            {
+                "model": "yield",
+                "component": "M1-M5 average minus M0",
+                "specification": "Normal",
+                "parameter": "sd=2.0",
+                "scale": "standardized",
+            },
+            {
+                "model": "yield",
+                "component": "orthonormal M1-M5 timing contrasts",
+                "specification": "Normal(0, tau_timing)",
+                "parameter": "tau_timing ~ HalfNormal(scale)",
+                "scale": "standardized",
+            },
+            {
+                "model": "yield",
+                "component": "block contrasts",
+                "specification": "Normal",
+                "parameter": "sd=0.75",
+                "scale": "standardized",
+            },
+            {
+                "model": "longitudinal",
+                "component": "response",
+                "specification": "Student-t with plot random intercept",
+                "parameter": f"nu={STUDENT_T_DF:g}",
+                "scale": "standardized within sector/outcome",
+            },
+            {
+                "model": "longitudinal",
+                "component": "treatment x date coefficients",
+                "specification": "Normal(0, tau_interaction)",
+                "parameter": "tau_interaction ~ HalfNormal(0.5)",
+                "scale": "standardized",
+            },
+            {
+                "model": "all",
+                "component": "centering and scaling",
+                "specification": "empirical numerical transformation",
+                "parameter": "observed mean and SD",
+                "scale": "not a pre-data prior",
+            },
+        ]
+        return self._show("probabilistic_model_specification", pd.DataFrame(rows))
+
+    # ------------------------------------------------------------------
+    # Yield model
+    # ------------------------------------------------------------------
+
+    def _yield_design(self, sector: str) -> YieldDesign:
+        data = self._require_data()
+        frame = data.harvest.loc[
+            data.harvest["sector"].astype(str).eq(sector),
+            ["sector", "block", "treatment", "clean_yield_kg_ha"],
         ].copy()
-        for prior_index, timing_scale in enumerate([0.25, 0.50, 1.00]):
-            prior_summary = prior_predictive_summary(
-                sector_frame,
-                timing_prior_scale=timing_scale,
-                seed=RANDOM_SEED + 50000 + sector_index * 1000 + prior_index * 100,
+        frame = frame.assign(
+            block=frame["block"].astype(str),
+            treatment=frame["treatment"].astype(str),
+        ).reset_index(drop=True)
+        treatments = tuple(data.spec.treatments)
+        blocks = tuple(sorted(frame["block"].unique()))
+        treatment_index = pd.Categorical(
+            frame["treatment"],
+            categories=list(treatments),
+            ordered=True,
+        ).codes
+        block_index = pd.Categorical(
+            frame["block"],
+            categories=list(blocks),
+            ordered=True,
+        ).codes
+        timing_basis = helmert(5, full=False).T
+        block_basis = helmert(len(blocks), full=False).T
+        extra_n = (treatment_index > 0).astype(float)
+        timing = np.zeros((len(frame), 4), dtype=float)
+        fertilized = treatment_index > 0
+        timing[fertilized] = timing_basis[treatment_index[fertilized] - 1]
+        block = block_basis[block_index]
+        group_timing = np.zeros((len(treatments), 4), dtype=float)
+        group_timing[1:] = timing_basis
+        y = frame["clean_yield_kg_ha"].to_numpy(float)
+        center = float(y.mean())
+        scale = float(y.std(ddof=1))
+        if not np.isfinite(scale) or scale <= 0.0:
+            raise ValueError(f"No se puede estandarizar rendimiento en {sector}.")
+        return YieldDesign(
+            frame=frame,
+            center=center,
+            scale=scale,
+            extra_n=extra_n,
+            timing=timing,
+            block=block,
+            group_timing=group_timing,
+            treatments=treatments,
+            blocks=blocks,
+        )
+
+    def conditional_prior_predictive(self, *, draws: int = 20000) -> pd.DataFrame:
+        rows: list[dict[str, object]] = []
+        data = self._require_data()
+        for sector in data.spec.sectors:
+            design = self._yield_design(sector)
+            for specification, timing_scale in TIMING_PRIOR_SCALES.items():
+                rng = np.random.default_rng(
+                    _stable_seed(
+                        sector,
+                        specification,
+                        "conditional_prior",
+                        base=self.random_seed,
+                    )
+                )
+                intercept = rng.normal(0.0, 1.5, draws)
+                extra = rng.normal(0.0, 2.0, draws)
+                tau = np.abs(rng.normal(0.0, timing_scale, draws))
+                timing = rng.normal(0.0, tau[:, None], size=(draws, 4))
+                group_z = intercept[:, None] + np.column_stack(
+                    [
+                        np.zeros(draws),
+                        np.repeat(extra[:, None], 5, axis=1),
+                    ]
+                )
+                group_z = group_z + timing @ design.group_timing.T
+                group_means = design.center + design.scale * group_z
+                sigma_z = np.abs(rng.normal(0.0, 1.0, draws))
+                replicated = group_means + design.scale * sigma_z[
+                    :, None
+                ] * rng.standard_t(
+                    STUDENT_T_DF,
+                    size=group_means.shape,
+                )
+                spread = np.ptp(group_means[:, 1:], axis=1)
+                rows.append(
+                    {
+                        "sector": sector,
+                        "specification": specification,
+                        "timing_prior_scale_z": timing_scale,
+                        "draws": draws,
+                        "observed_center_kg_ha": design.center,
+                        "observed_scale_kg_ha": design.scale,
+                        "conditional_on_observed_scaling": True,
+                        "treatment_mean_lower_95": float(
+                            np.quantile(group_means, 0.025)
+                        ),
+                        "treatment_mean_upper_95": float(
+                            np.quantile(group_means, 0.975)
+                        ),
+                        "p_any_treatment_mean_below_zero": float(
+                            np.mean(np.any(group_means < 0.0, axis=1))
+                        ),
+                        "p_replicated_yield_below_zero": float(
+                            np.mean(replicated < 0.0)
+                        ),
+                        "p_replicated_yield_above_3000": float(
+                            np.mean(replicated > 3000.0)
+                        ),
+                        "median_prior_range_m1_m5": float(np.median(spread)),
+                        "range_upper_95_m1_m5": float(np.quantile(spread, 0.95)),
+                    }
+                )
+        return self._show("conditional_prior_predictive_audit", pd.DataFrame(rows))
+
+    def _sample_yield_model(
+        self,
+        *,
+        sector: str,
+        specification: str,
+        timing_prior_scale: float,
+    ) -> FittedModel:
+        design = self._yield_design(sector)
+        y_z = (
+            design.frame["clean_yield_kg_ha"].to_numpy(float) - design.center
+        ) / design.scale
+        coords = {
+            "observation": np.arange(len(design.frame)),
+            "timing_contrast": [f"timing_{index + 1}" for index in range(4)],
+            "block_contrast": [
+                f"block_{index + 1}" for index in range(design.block.shape[1])
+            ],
+            "treatment": list(design.treatments),
+        }
+        with pm.Model(coords=coords):
+            intercept = pm.Normal("intercept", 0.0, 1.5)
+            extra_n = pm.Normal("extra_n", 0.0, 2.0)
+            tau_timing = pm.HalfNormal("tau_timing", timing_prior_scale)
+            timing_raw = pm.Normal(
+                "timing_raw",
+                0.0,
+                1.0,
+                dims="timing_contrast",
             )
-            prior_summary.insert(0, "sector", sector)
-            prior_predictive_rows.append(prior_summary)
-    prior_predictive = pd.concat(prior_predictive_rows, ignore_index=True)
+            timing_coefficient = pm.Deterministic(
+                "timing_coefficient",
+                timing_raw * tau_timing,
+                dims="timing_contrast",
+            )
+            block_coefficient = pm.Normal(
+                "block_coefficient",
+                0.0,
+                0.75,
+                dims="block_contrast",
+            )
+            sigma = pm.HalfNormal("sigma", 1.0)
+            mu = (
+                intercept
+                + extra_n * design.extra_n
+                + pt_api.dot(design.timing, timing_coefficient)
+                + pt_api.dot(design.block, block_coefficient)
+            )
+            group_z = (
+                intercept
+                + extra_n * np.asarray([0.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+                + pt_api.dot(design.group_timing, timing_coefficient)
+            )
+            pm.Deterministic(
+                "mean_yield",
+                design.center + design.scale * group_z,
+                dims="treatment",
+            )
+            pm.StudentT(
+                "y_obs",
+                nu=STUDENT_T_DF,
+                mu=mu,
+                sigma=sigma,
+                observed=y_z,
+                dims="observation",
+            )
+            inference = pm.sample(
+                draws=self.draws,
+                tune=self.tune,
+                chains=self.chains,
+                cores=self.cores,
+                target_accept=self.target_accept,
+                random_seed=_stable_seed(sector, specification, base=self.random_seed),
+                return_inferencedata=True,
+                idata_kwargs={"log_likelihood": True},
+            )
+            posterior_predictive = pm.sample_posterior_predictive(
+                inference,
+                var_names=["y_obs"],
+                random_seed=_stable_seed(
+                    sector,
+                    specification,
+                    "posterior_predictive",
+                    base=self.random_seed,
+                ),
+                return_inferencedata=True,
+            )
+        inference.extend(posterior_predictive)
+        model_id = f"yield_{sector.casefold()}_{specification}"
+        return FittedModel(
+            model_id=model_id,
+            sector=sector,
+            outcome="clean_yield_kg_ha",
+            specification=specification,
+            inference_data=inference,
+            design=design,
+        )
 
-    for sector_index, sector in enumerate(SECTORS):
-        sector_frame = yield_data.loc[
-            yield_data["sector"].astype(str).eq(sector)
-        ].copy()
-        for specification_index, (specification, (kind, scale)) in enumerate(
-            specifications.items()
-        ):
-            seed = RANDOM_SEED + sector_index * 10000 + specification_index * 100
-            if kind == "hierarchical":
-                design, samples, metadata = sample_hierarchical_yield(
-                    sector_frame,
+    def fit_yield_models(self) -> pd.DataFrame:
+        data = self._require_data()
+        rows: list[dict[str, object]] = []
+        for sector in data.spec.sectors:
+            for specification, scale in TIMING_PRIOR_SCALES.items():
+                fitted = self._sample_yield_model(
+                    sector=sector,
+                    specification=specification,
                     timing_prior_scale=scale,
-                    seed=seed,
                 )
-            else:
-                design, samples, metadata = sample_fixed_yield(
-                    sector_frame,
-                    timing_sd=scale,
-                    seed=seed,
+                self.yield_models[fitted.model_id] = fitted
+                rows.append(
+                    {
+                        "model_id": fitted.model_id,
+                        "sector": sector,
+                        "specification": specification,
+                        "timing_prior_scale_z": scale,
+                        "draws": self.draws,
+                        "tune": self.tune,
+                        "chains": self.chains,
+                    }
                 )
-            diagnostics: dict[str, object] = {**convergence_diagnostics(samples)}
-            diagnostics.update(
+        return self._show("yield_model_runs", pd.DataFrame(rows))
+
+    @staticmethod
+    def _diagnostic_summary(fitted: FittedModel) -> dict[str, object]:
+        inference = fitted.inference_data
+        summary = az.summary(
+            inference,
+            var_names=[
+                "intercept",
+                "extra_n",
+                "tau_timing",
+                "timing_coefficient",
+                "block_coefficient",
+                "sigma",
+            ],
+            round_to=None,
+        )
+        divergences = int(np.asarray(inference.sample_stats["diverging"]).sum())
+        return {
+            "model_id": fitted.model_id,
+            "sector": fitted.sector,
+            "outcome": fitted.outcome,
+            "specification": fitted.specification,
+            "max_rhat": float(summary["r_hat"].max()),
+            "min_ess_bulk": float(summary["ess_bulk"].min()),
+            "min_ess_tail": float(summary["ess_tail"].min()),
+            "divergences": divergences,
+            "accepted": bool(
+                summary["r_hat"].max() <= 1.01
+                and summary["ess_bulk"].min() >= 400
+                and divergences == 0
+            ),
+        }
+
+    def yield_diagnostics(self) -> pd.DataFrame:
+        if not self.yield_models:
+            self.fit_yield_models()
+        rows = [self._diagnostic_summary(model) for model in self.yield_models.values()]
+        return self._show("yield_model_diagnostics", pd.DataFrame(rows))
+
+    def _yield_summaries_for_model(
+        self,
+        fitted: FittedModel,
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        means = _flatten_posterior(fitted.inference_data.posterior["mean_yield"])
+        design = cast(YieldDesign, fitted.design)
+        fertilized = means[:, 1:]
+        spread = np.ptp(fertilized, axis=1)
+        extra_n = fertilized.mean(axis=1) - means[:, 0]
+        early_late = fertilized[:, :2].mean(axis=1) - fertilized[:, 3:5].mean(axis=1)
+        m5_others = fertilized[:, 4] - fertilized[:, :4].mean(axis=1)
+        best = np.argmax(fertilized, axis=1)
+        worst = np.argmin(fertilized, axis=1)
+
+        treatment_rows: list[dict[str, object]] = []
+        for index, treatment in enumerate(design.treatments):
+            treatment_rows.append(
                 {
-                    "sector": sector,
-                    "specification": specification,
-                    "kind": kind,
-                    "timing_prior_scale": scale,
-                    **metadata,
+                    "sector": fitted.sector,
+                    "specification": fitted.specification,
+                    "treatment": treatment,
+                    **_quantile_summary(means[:, index]),
                 }
             )
-            diagnostic_rows.append(diagnostics)
-            treatment, estimand, rank, margin = summarize_yield_draws(
-                sector, specification, samples
+
+        estimands = {
+            "mean_M1_M5_minus_M0": extra_n,
+            "mean_M1_M2_minus_mean_M4_M5": early_late,
+            "M5_minus_mean_M1_M4": m5_others,
+            "range_M1_M5": spread,
+        }
+        estimand_rows: list[dict[str, object]] = []
+        for name, values in estimands.items():
+            estimand_rows.append(
+                {
+                    "sector": fitted.sector,
+                    "specification": fitted.specification,
+                    "estimand": name,
+                    **_quantile_summary(values),
+                    "p_gt_0": float(np.mean(values > 0.0)),
+                    "p_abs_gt_100": float(np.mean(np.abs(values) > 100.0)),
+                }
             )
+
+        rank_rows: list[dict[str, object]] = []
+        for index, treatment in enumerate(design.treatments[1:]):
+            rank_rows.append(
+                {
+                    "sector": fitted.sector,
+                    "specification": fitted.specification,
+                    "treatment": treatment,
+                    "p_best": float(np.mean(best == index)),
+                    "p_worst": float(np.mean(worst == index)),
+                    "p_within_50_of_best": float(
+                        np.mean(fertilized[:, index] >= fertilized.max(axis=1) - 50.0)
+                    ),
+                    "p_within_100_of_best": float(
+                        np.mean(fertilized[:, index] >= fertilized.max(axis=1) - 100.0)
+                    ),
+                    "p_within_150_of_best": float(
+                        np.mean(fertilized[:, index] >= fertilized.max(axis=1) - 150.0)
+                    ),
+                }
+            )
+
+        margin_rows: list[dict[str, object]] = []
+        for margin in np.arange(0.0, 301.0, 5.0):
+            margin_rows.append(
+                {
+                    "sector": fitted.sector,
+                    "specification": fitted.specification,
+                    "margin_kg_ha": margin,
+                    "p_range_gt_margin": float(np.mean(spread > margin)),
+                    "p_all_within_margin": float(np.mean(spread <= margin)),
+                }
+            )
+        return (
+            pd.DataFrame(treatment_rows),
+            pd.DataFrame(estimand_rows),
+            pd.DataFrame(rank_rows),
+            pd.DataFrame(margin_rows),
+        )
+
+    def yield_posterior_summaries(self) -> pd.DataFrame:
+        if not self.yield_models:
+            self.fit_yield_models()
+        treatment_tables: list[pd.DataFrame] = []
+        estimand_tables: list[pd.DataFrame] = []
+        rank_tables: list[pd.DataFrame] = []
+        margin_tables: list[pd.DataFrame] = []
+        for fitted in self.yield_models.values():
+            treatment, estimand, rank, margin = self._yield_summaries_for_model(fitted)
             treatment_tables.append(treatment)
             estimand_tables.append(estimand)
             rank_tables.append(rank)
             margin_tables.append(margin)
-            if specification == "Principal":
-                primary[sector] = (design, samples)
-                np.savez_compressed(
-                    POSTERIORS / f"model_a_corrected_{sector.lower()}.npz",
-                    mean_yield=samples["mean_yield"],
-                    mu_obs=samples["mu_obs"],
-                    sigma_yield=samples["sigma_yield"],
-                    beta=samples["beta"],
-                    tau_timing=samples.get("tau_timing", np.array([])),
-                )
+        treatments = pd.concat(treatment_tables, ignore_index=True)
+        estimands = pd.concat(estimand_tables, ignore_index=True)
+        ranks = pd.concat(rank_tables, ignore_index=True)
+        margins = pd.concat(margin_tables, ignore_index=True)
+        self.tables["yield_posterior_estimands"] = estimands
+        self.tables["yield_rank_probabilities"] = ranks
+        self.tables["yield_margin_curves"] = margins
+        self._show("yield_posterior_treatment_means", treatments)
 
-    treatment_means = pd.concat(treatment_tables, ignore_index=True)
-    estimands = pd.concat(estimand_tables, ignore_index=True)
-    ranks = pd.concat(rank_tables, ignore_index=True)
-    margins = pd.concat(margin_tables, ignore_index=True)
-    diagnostics = pd.DataFrame(diagnostic_rows)
-
-    # Cross-sector comparisons under the primary prior.
-    secano_means = flatten(primary["Secano"][1], "mean_yield")
-    riego_means = flatten(primary["Riego"][1], "mean_yield")
-    n_pair = min(len(secano_means), len(riego_means))
-    secano_means = secano_means[:n_pair]
-    riego_means = riego_means[:n_pair]
-    secano_early_late = secano_means[:, 1:3].mean(axis=1) - secano_means[:, 4:6].mean(
-        axis=1
-    )
-    riego_early_late = riego_means[:, 1:3].mean(axis=1) - riego_means[:, 4:6].mean(
-        axis=1
-    )
-    sector_difference = riego_early_late - secano_early_late
-    centered_secano = secano_means[:, 1:] - secano_means[:, 1:].mean(
-        axis=1, keepdims=True
-    )
-    centered_riego = riego_means[:, 1:] - riego_means[:, 1:].mean(axis=1, keepdims=True)
-    pattern_difference = centered_riego - centered_secano
-    max_abs_pattern_difference = np.max(np.abs(pattern_difference), axis=1)
-    rms_pattern_difference = np.sqrt(np.mean(pattern_difference**2, axis=1))
-
-    sector_rows = []
-    for name, values in {
-        "Diferencia sectorial del contraste temprano–tardío": sector_difference,
-        "Máxima diferencia absoluta del patrón relativo M1–M5": max_abs_pattern_difference,
-        "Diferencia RMS del patrón relativo M1–M5": rms_pattern_difference,
-    }.items():
-        sector_rows.append(
-            {
-                "estimand": name,
-                "median": float(np.median(values)),
-                "lower_95": float(np.quantile(values, 0.025)),
-                "upper_95": float(np.quantile(values, 0.975)),
-                "p_abs_gt_50": float(np.mean(np.abs(values) > 50.0)),
-                "p_abs_gt_100": float(np.mean(np.abs(values) > 100.0)),
-                "p_gt_0": float(np.mean(values > 0.0)),
-            }
+        primary = treatments.loc[treatments["specification"].eq("primary")]
+        data = self._require_data()
+        treatment_order = list(data.spec.treatments)
+        treatment_colors = dict(
+            zip(
+                treatment_order,
+                self.palette[: len(treatment_order)],
+                strict=True,
+            )
         )
-    sector_comparison = pd.DataFrame(sector_rows)
-
-    # Leave-one-block-out sensitivity for primary prior.
-    loo_rows = []
-    for sector_index, sector in enumerate(SECTORS):
-        sector_frame = yield_data.loc[
-            yield_data["sector"].astype(str).eq(sector)
-        ].copy()
-        present_blocks = sorted(sector_frame["block"].astype(str).unique().tolist())
-        for block_index, omitted in enumerate(present_blocks):
-            subset = sector_frame.loc[
-                sector_frame["block"].astype(str).ne(omitted)
-            ].copy()
-            _, samples, _ = sample_hierarchical_yield(
-                subset,
-                timing_prior_scale=0.50,
-                iterations=10000,
-                burn=2000,
-                thin=4,
-                seed=RANDOM_SEED + 20000 + sector_index * 1000 + block_index * 50,
-            )
-            means = flatten(samples, "mean_yield")
-            fertilized = means[:, 1:]
-            spread = np.ptp(fertilized, axis=1)
-            early_late = fertilized[:, :2].mean(axis=1) - fertilized[:, 3:5].mean(
-                axis=1
-            )
-            extra_n = fertilized.mean(axis=1) - means[:, 0]
-            diagnostics_loo = convergence_diagnostics(samples)
-            loo_rows.append(
-                {
-                    "sector": sector,
-                    "omitted_block": omitted,
-                    "median_range": float(np.median(spread)),
-                    "p_range_gt_100": float(np.mean(spread > 100.0)),
-                    "median_early_late": float(np.median(early_late)),
-                    "p_early_gt_late": float(np.mean(early_late > 0.0)),
-                    "median_extra_n": float(np.median(extra_n)),
-                    **diagnostics_loo,
-                }
-            )
-    leave_one_out = pd.DataFrame(loo_rows)
-
-    # Posterior predictive replication of the thesis ANOVA.
-    ppc_summaries = []
-    ppc_draws = []
-    observed_p = {"Secano": 0.428718, "Riego": 0.175851}
-    for sector in SECTORS:
-        summary, draws = posterior_predictive_summary(
-            sector,
-            primary[sector][0],
-            primary[sector][1],
-            observed_p[sector],
+        rng = np.random.default_rng(self.random_seed)
+        fig, axes = plt.subplots(
+            1, len(data.spec.sectors), figsize=(12.2, 5.2), sharey=True
         )
-        ppc_summaries.append(summary)
-        ppc_draws.append(draws)
-    ppc_summary = pd.concat(ppc_summaries, ignore_index=True)
-    ppc_draws_table = pd.concat(ppc_draws, ignore_index=True)
-
-    # Longitudinal Model A, Model B, and reconstruction-null summaries from supplied run.
-    trajectories, longitudinal_contrasts = summarize_longitudinal_model_a()
-    model_b_states = load_legacy_table("model_b_state_trajectories.csv")
-    model_b_nni = load_legacy_table("model_b_final_nni_probabilities.csv")
-    reconstruction_null = load_legacy_table("reconstruction_null_percentiles.csv")
-    original_diagnostics = load_legacy_table("original_run_diagnostics.csv")
-
-    # Save all tables.
-    yield_data.to_csv(TABLES / "yield_data.csv", index=False)
-    prior_table.to_csv(TABLES / "prior_specification.csv", index=False)
-    prior_predictive.to_csv(TABLES / "prior_predictive_summary.csv", index=False)
-    treatment_means.to_csv(
-        TABLES / "model_a_corrected_treatment_means.csv", index=False
-    )
-    estimands.to_csv(TABLES / "model_a_corrected_estimands.csv", index=False)
-    ranks.to_csv(TABLES / "model_a_corrected_rank_probabilities.csv", index=False)
-    margins.to_csv(TABLES / "model_a_corrected_margin_curves.csv", index=False)
-    diagnostics.to_csv(TABLES / "model_a_corrected_diagnostics.csv", index=False)
-    sector_comparison.to_csv(
-        TABLES / "model_a_corrected_sector_comparison.csv", index=False
-    )
-    leave_one_out.to_csv(
-        TABLES / "model_a_corrected_leave_one_block_out.csv", index=False
-    )
-    ppc_summary.to_csv(TABLES / "model_a_corrected_ppc_summary.csv", index=False)
-    ppc_draws_table.to_csv(TABLES / "model_a_corrected_ppc_draws.csv", index=False)
-    trajectories.to_csv(TABLES / "model_a_longitudinal_trajectories.csv", index=False)
-    longitudinal_contrasts.to_csv(
-        TABLES / "model_a_longitudinal_contrasts.csv", index=False
-    )
-    model_b_states.to_csv(TABLES / "model_b_state_trajectories.csv", index=False)
-    model_b_nni.to_csv(TABLES / "model_b_final_nni_probabilities.csv", index=False)
-    reconstruction_null.to_csv(
-        TABLES / "reconstruction_null_percentiles.csv", index=False
-    )
-    original_diagnostics.to_csv(TABLES / "original_run_diagnostics.csv", index=False)
-
-    make_figures(
-        yield_data=yield_data,
-        treatment_means=treatment_means,
-        margins=margins,
-        ranks=ranks,
-        estimands=estimands,
-        sector_comparison=sector_comparison,
-        leave_one_out=leave_one_out,
-        ppc_draws=ppc_draws_table,
-        trajectories=trajectories,
-        longitudinal_contrasts=longitudinal_contrasts,
-        model_b_states=model_b_states,
-        reconstruction_null=reconstruction_null,
-    )
-
-
-def run_all_cli() -> None:
-    """Regenerate the annex with a non-interactive plotting backend."""
-    plt.switch_backend("Agg")
-    run_all()
-
-
-def save_figure(fig: Figure, name: str) -> None:
-    fig.savefig(FIGURES / f"{name}.png", dpi=180, bbox_inches="tight")
-    fig.savefig(FIGURES / f"{name}.svg", bbox_inches="tight")
-    plt.close(fig)
-
-
-def plot_observed_yield_panels(
-    axes: Any,
-    *,
-    yield_data: pd.DataFrame,
-    treatment_means: pd.DataFrame,
-    treatment_colors: dict[str, str],
-) -> None:
-    rng = np.random.default_rng(RANDOM_SEED)
-    for axis, sector in zip(axes, SECTORS):
-        observed = yield_data.loc[yield_data["sector"].astype(str).eq(sector)]
-        posterior = (
-            treatment_means.loc[
-                treatment_means["sector"].eq(sector)
-                & treatment_means["specification"].eq("Principal")
+        axes_array = np.atleast_1d(axes)
+        for axis, sector in zip(axes_array, data.spec.sectors, strict=True):
+            posterior = (
+                primary.loc[primary["sector"].eq(sector)]
+                .set_index("treatment")
+                .reindex(treatment_order)
+            )
+            observed_sector = data.harvest.loc[
+                data.harvest["sector"].astype(str).eq(sector)
             ]
-            .set_index("treatment")
-            .reindex(TREATMENTS)
+            for index, treatment in enumerate(treatment_order):
+                values = observed_sector.loc[
+                    observed_sector["treatment"].astype(str).eq(treatment),
+                    "clean_yield_kg_ha",
+                ].to_numpy(float)
+                jitter = rng.normal(0.0, 0.035, size=len(values))
+                axis.scatter(
+                    np.full(len(values), index) + jitter,
+                    values,
+                    color=treatment_colors[treatment],
+                    alpha=0.45,
+                    s=26,
+                    linewidths=0,
+                    zorder=2,
+                )
+                row = cast(Any, posterior.loc[treatment])
+                axis.errorbar(
+                    index,
+                    row["posterior_mean"],
+                    yerr=np.asarray(
+                        [
+                            [row["posterior_mean"] - row["lower_95"]],
+                            [row["upper_95"] - row["posterior_mean"]],
+                        ]
+                    ),
+                    color=treatment_colors[treatment],
+                    marker="o",
+                    linestyle="none",
+                    markerfacecolor=(
+                        "white" if treatment == "M0" else treatment_colors[treatment]
+                    ),
+                    markeredgecolor=treatment_colors[treatment],
+                    markersize=MARKER_SIZE,
+                    capsize=ERRORBAR_CAPSIZE,
+                    elinewidth=INTERVAL_LINEWIDTH,
+                    zorder=4,
+                    label="Media posterior e IC 95 %" if index == 0 else None,
+                )
+            axis.set_xticks(np.arange(len(treatment_order)), treatment_order)
+            axis.set_title(sector.upper())
+            axis.set_xlabel("Tratamiento")
+            axis.grid(axis="y", alpha=0.25)
+        axes_array[0].set_ylabel("Rendimiento limpio (kg ha⁻¹)")
+        handles, labels = axes_array[-1].get_legend_handles_labels()
+        fig.legend(
+            handles,
+            labels,
+            loc="upper center",
+            ncol=2,
+            bbox_to_anchor=(0.5, 0.83),
         )
-        for index, treatment in enumerate(TREATMENTS):
-            values = observed.loc[
-                observed["treatment"].astype(str).eq(treatment),
-                "clean_yield_kg_ha",
-            ].to_numpy()
-            jitter = rng.normal(0.0, 0.035, size=len(values))
-            axis.scatter(
-                np.full(len(values), index) + jitter,
-                values,
-                color=treatment_colors[treatment],
-                alpha=0.45,
-                s=26,
-                linewidths=0,
-            )
-            row = posterior.loc[treatment]
-            axis.errorbar(
-                index,
-                row["posterior_mean"],
-                yerr=np.array(
-                    [
-                        [row["posterior_mean"] - row["lower_95"]],
-                        [row["upper_95"] - row["posterior_mean"]],
-                    ]
-                ),
-                color=treatment_colors[treatment],
-                marker="o",
-                linestyle="none",
-                markerfacecolor=(
-                    "white" if treatment == "M0" else treatment_colors[treatment]
-                ),
-                markeredgecolor=treatment_colors[treatment],
-                markersize=MARKER_SIZE,
-                capsize=ERRORBAR_CAPSIZE,
-                elinewidth=INTERVAL_LINEWIDTH,
-                label="Media posterior e IC 95 %" if index == 0 else None,
-            )
-        axis.set_xticks(np.arange(len(TREATMENTS)), TREATMENTS)
-        axis.set_title(sector.upper())
-        axis.set_xlabel("Tratamiento")
-        axis.grid(axis="y", alpha=0.25)
-
-
-def plot_margin_panels(
-    axes: Any,
-    margins: pd.DataFrame,
-    *,
-    principal_color: str,
-) -> None:
-    for axis, sector in zip(axes, SECTORS):
-        subset = margins.loc[margins["sector"].eq(sector)]
-        principal = subset.loc[subset["specification"].eq("Principal")]
-        axis.plot(
-            principal["margin_kg_ha"],
-            principal["p_range_gt_margin"],
-            color=principal_color,
-            linewidth=EMPHASIS_LINEWIDTH,
-            zorder=3,
+        fig.subplots_adjust(left=0.08, right=0.98, bottom=0.15, top=0.70, wspace=0.12)
+        self._save_figure(
+            fig,
+            "01_yield_observed_posterior",
+            title="Rendimiento observado y estimación posterior corregida",
+            subtitle=(
+                "Puntos claros: parcelas observadas. Círculos y barras: media posterior "
+                "e intervalo creíble del 95 % del modelo principal robusto."
+            ),
         )
-        alternatives = subset.loc[subset["specification"].ne("Principal")]
-        for _, group in alternatives.groupby("specification", sort=False):
+        return treatments
+
+    def margin_sensitivity(self) -> pd.DataFrame:
+        if "yield_margin_curves" not in self.tables:
+            self.yield_posterior_summaries()
+        margins = self.tables["yield_margin_curves"]
+        fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.0), sharey=True)
+        for axis, sector in zip(axes, self._require_data().spec.sectors, strict=True):
+            sector_data = margins.loc[margins["sector"].eq(sector)]
+            principal = sector_data.loc[sector_data["specification"].eq("primary")]
             axis.plot(
-                group["margin_kg_ha"],
-                group["p_range_gt_margin"],
-                color="0.48",
-                alpha=0.52,
-                linewidth=SECONDARY_LINEWIDTH,
-                zorder=2,
+                principal["margin_kg_ha"],
+                principal["p_range_gt_margin"],
+                color=self.palette[3],
+                linewidth=EMPHASIS_LINEWIDTH,
+                zorder=3,
             )
-        axis.axvline(100.0, linestyle="--", linewidth=REFERENCE_LINEWIDTH)
-        axis.axhline(0.5, linestyle=":", linewidth=REFERENCE_LINEWIDTH)
-        axis.set_title(sector.upper())
-        axis.set_xlabel("Margen práctico δ (kg/ha)")
-        axis.set_ylim(-0.02, 1.02)
-        axis.grid(alpha=0.22)
-
-
-def plot_near_optimal_panels(
-    axes: Any,
-    primary_ranks: pd.DataFrame,
-    *,
-    treatment_colors: dict[str, str],
-) -> None:
-    for axis, sector in zip(axes, SECTORS):
-        group = (
-            primary_ranks.loc[primary_ranks["sector"].eq(sector)]
-            .set_index("treatment")
-            .reindex(FERTILIZED)
-        )
-        axis.bar(
-            FERTILIZED,
-            group["p_within_100_best"],
-            color=[treatment_colors[treatment] for treatment in FERTILIZED],
-        )
-        axis.set_title(sector.upper())
-        axis.set_xlabel("Calendario")
-        axis.set_ylim(0.0, 1.0)
-        axis.grid(axis="y", alpha=0.22)
-        for index, value in enumerate(group["p_within_100_best"]):
-            axis.text(
-                index,
-                value + 0.025,
-                f"{100 * value:.0f}%",
-                ha="center",
-                fontsize=9.5,
-            )
-
-
-def yield_contrast_plot_data(
-    primary_estimands: pd.DataFrame,
-    sector_comparison: pd.DataFrame,
-) -> tuple[list[str], list[tuple[float, float, float]]]:
-    labels: list[str] = []
-    values: list[tuple[float, float, float]] = []
-    for sector in SECTORS:
-        row = primary_estimands.loc[primary_estimands["sector"].eq(sector)].iloc[0]
-        labels.append(sector)
-        values.append(
-            (float(row["median"]), float(row["lower_95"]), float(row["upper_95"]))
-        )
-    row = sector_comparison.loc[
-        sector_comparison["estimand"].eq(
-            "Diferencia sectorial del contraste temprano–tardío"
-        )
-    ].iloc[0]
-    labels.append("Riego − Secano")
-    values.append(
-        (float(row["median"]), float(row["lower_95"]), float(row["upper_95"]))
-    )
-    return labels, values
-
-
-def plot_leave_one_out_panels(
-    axes: Any,
-    *,
-    leave_one_out: pd.DataFrame,
-    margins: pd.DataFrame,
-) -> None:
-    for axis, sector in zip(axes, SECTORS):
-        group = leave_one_out.loc[leave_one_out["sector"].eq(sector)].copy()
-        axis.scatter(group["omitted_block"], group["p_range_gt_100"], s=52)
-        full_value = margins.loc[
-            margins["sector"].eq(sector)
-            & margins["specification"].eq("Principal")
-            & margins["margin_kg_ha"].eq(100.0),
-            "p_range_gt_margin",
-        ].iloc[0]
-        axis.axhline(
-            full_value,
-            linestyle="--",
-            linewidth=REFERENCE_LINEWIDTH,
-            label="Todos los bloques",
-        )
-        axis.set_title(sector.upper())
-        axis.set_xlabel("Bloque omitido")
-        axis.set_ylim(0.0, 1.0)
-        axis.grid(axis="y", alpha=0.22)
-
-
-def plot_ppc_panels(axes: Any, ppc_draws: pd.DataFrame) -> None:
-    observed_p = {"Secano": 0.428718, "Riego": 0.175851}
-    for axis, sector in zip(axes, SECTORS):
-        values = ppc_draws.loc[ppc_draws["sector"].eq(sector), "p_value_m1_m5"]
-        axis.hist(values, bins=np.linspace(0, 1, 31), density=True, alpha=0.75)
-        axis.axvline(
-            0.05,
-            linestyle="--",
-            linewidth=REFERENCE_LINEWIDTH,
-            label="0,05",
-        )
-        axis.axvline(
-            observed_p[sector],
-            linestyle=":",
-            linewidth=DATA_LINEWIDTH,
-            label="p observado",
-        )
-        axis.set_title(sector.upper())
-        axis.set_xlabel("p del ANOVA M1–M5 en un ensayo replicado")
-        axis.grid(axis="y", alpha=0.18)
-
-
-def plot_trajectory_panels(
-    axes: Any,
-    frame: pd.DataFrame,
-    *,
-    value_column: str,
-    y_label: str,
-    treatment_colors: dict[str, str],
-    reference: float | None = None,
-) -> None:
-    date_x = np.arange(3)
-    treatment_offsets = dict(
-        zip(TREATMENTS, np.linspace(-0.31, 0.31, len(TREATMENTS)), strict=True)
-    )
-    for axis, sector in zip(axes, SECTORS):
-        subset = frame.loc[frame["sector"].eq(sector)]
-        for treatment in TREATMENTS:
-            group = (
-                subset.loc[subset["treatment"].eq(treatment)]
-                .set_index("date")
-                .reindex(DATES)
-            )
-            estimate_x = date_x + treatment_offsets[treatment]
-            axis.errorbar(
-                estimate_x,
-                group[value_column],
-                yerr=np.vstack(
-                    [
-                        group[value_column] - group["lower_95"],
-                        group["upper_95"] - group[value_column],
-                    ]
-                ),
-                marker="o",
-                linestyle="none",
-                color=treatment_colors[treatment],
-                markerfacecolor=(
-                    "white" if treatment == "M0" else treatment_colors[treatment]
-                ),
-                markeredgecolor=treatment_colors[treatment],
-                capsize=ERRORBAR_CAPSIZE,
-                elinewidth=INTERVAL_LINEWIDTH,
-                markersize=MARKER_SIZE,
-                label=treatment,
-            )
-        if reference is not None:
-            axis.axhline(
-                reference,
+            alternatives = sector_data.loc[sector_data["specification"].ne("primary")]
+            for _, group in alternatives.groupby("specification", sort=False):
+                axis.plot(
+                    group["margin_kg_ha"],
+                    group["p_range_gt_margin"],
+                    color="0.48",
+                    alpha=0.52,
+                    linewidth=SECONDARY_LINEWIDTH,
+                    zorder=2,
+                )
+            axis.axvline(
+                100.0,
+                color=self.palette[5],
                 linestyle="--",
                 linewidth=REFERENCE_LINEWIDTH,
             )
-        for date_position in date_x:
-            for treatment in TREATMENTS:
-                axis.text(
-                    date_position + treatment_offsets[treatment],
-                    -0.035,
-                    treatment,
-                    transform=axis.get_xaxis_transform(),
-                    ha="center",
-                    va="top",
-                    fontsize=8.5,
-                    color="0.38",
-                    clip_on=False,
+            axis.axhline(
+                0.5,
+                color=self.palette[5],
+                linestyle=":",
+                linewidth=REFERENCE_LINEWIDTH,
+            )
+            axis.set_title(sector.upper())
+            axis.set_xlabel("Margen práctico δ (kg ha⁻¹)")
+            axis.set_ylim(-0.02, 1.02)
+            axis.grid(alpha=0.22)
+        axes[0].set_ylabel("P(rango M1–M5 > δ | datos)")
+        fig.subplots_adjust(left=0.08, right=0.98, bottom=0.15, top=0.70, wspace=0.12)
+        self._save_figure(
+            fig,
+            "02_margin_prior_sensitivity",
+            title="La conclusión depende del margen práctico y de la regularización",
+            subtitle=(
+                "Curva principal destacada; curvas grises: sensibilidades alternativas. "
+                "Las guías marcan 100 kg ha⁻¹ y probabilidad 0,5; no declaran equivalencia."
+            ),
+        )
+        return self._show("yield_margin_sensitivity", margins)
+
+    def posterior_predictive_checks(self) -> pd.DataFrame:
+        if not self.yield_models:
+            self.fit_yield_models()
+        rows: list[dict[str, object]] = []
+        draws_rows: list[pd.DataFrame] = []
+        for fitted in self.yield_models.values():
+            if fitted.specification != "primary":
+                continue
+            design = cast(YieldDesign, fitted.design)
+            posterior_predictive_z = _flatten_posterior(
+                fitted.inference_data.posterior_predictive["y_obs"]
+            )
+            posterior_predictive = design.center + design.scale * posterior_predictive_z
+            observed_p = _observed_rcbd_p(design.frame)
+            p_values = _rcbd_anova_p_values(
+                posterior_predictive,
+                design.frame["treatment"].to_numpy(str),
+                design.frame["block"].to_numpy(str),
+            )
+            mean_yield = _flatten_posterior(
+                fitted.inference_data.posterior["mean_yield"]
+            )
+            latent_range = np.ptp(mean_yield[:, 1:], axis=1)
+            count = min(len(p_values), len(latent_range))
+            p_values = p_values[:count]
+            latent_range = latent_range[:count]
+            rows.append(
+                {
+                    "sector": fitted.sector,
+                    "observed_p_m1_m5": observed_p,
+                    "p_rep_anova_non_significant": float(np.mean(p_values > 0.05)),
+                    "p_rep_anova_p_le_observed": float(np.mean(p_values <= observed_p)),
+                    "p_latent_range_gt_100": float(np.mean(latent_range > 100.0)),
+                    "p_non_significant_given_range_gt_100": float(
+                        np.mean(p_values[latent_range > 100.0] > 0.05)
+                        if np.any(latent_range > 100.0)
+                        else np.nan
+                    ),
+                    "n_replications": count,
+                }
+            )
+            draws_rows.append(
+                pd.DataFrame(
+                    {
+                        "sector": fitted.sector,
+                        "p_value_m1_m5": p_values,
+                        "latent_range_m1_m5": latent_range,
+                    }
                 )
-        axis.set_xticks(date_x, ["16 sep", "20 oct", "12 nov"])
-        axis.tick_params(axis="x", which="major", pad=25, length=0)
-        axis.set_title(sector.upper())
-        axis.set_xlabel("")
-        axis.grid(alpha=0.22)
-    axes[0].set_ylabel(y_label)
+            )
+        summary = pd.DataFrame(rows)
+        draws = pd.concat(draws_rows, ignore_index=True)
+        self.tables["yield_posterior_predictive_draws"] = draws
+        self._show("yield_posterior_predictive_summary", summary)
 
+        fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.0), sharey=True)
+        for axis, sector in zip(axes, self._require_data().spec.sectors, strict=True):
+            sector_draws = draws.loc[draws["sector"].eq(sector)]
+            axis.hist(
+                sector_draws["p_value_m1_m5"],
+                bins=np.linspace(0.0, 1.0, 31),
+                density=True,
+                color=self.palette[0],
+                alpha=0.75,
+            )
+            observed = float(
+                summary.loc[summary["sector"].eq(sector), "observed_p_m1_m5"].iloc[0]
+            )
+            axis.axvline(
+                0.05,
+                color=self.palette[5],
+                linestyle="--",
+                linewidth=REFERENCE_LINEWIDTH,
+                label="0,05",
+            )
+            axis.axvline(
+                observed,
+                color=self.palette[3],
+                linestyle=":",
+                linewidth=DATA_LINEWIDTH,
+                label="p observado",
+            )
+            axis.set_title(sector.upper())
+            axis.set_xlabel("p del ANOVA M1–M5 en un ensayo replicado")
+            axis.grid(axis="y", alpha=0.18)
+        axes[0].set_ylabel("Densidad")
+        handles, labels = axes[-1].get_legend_handles_labels()
+        fig.legend(
+            handles,
+            labels,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.83),
+            ncol=2,
+        )
+        fig.subplots_adjust(left=0.08, right=0.98, bottom=0.17, top=0.69, wspace=0.12)
+        self._save_figure(
+            fig,
+            "03_posterior_predictive_anova",
+            title="Qué produciría nuevamente el análisis convencional",
+            subtitle=(
+                "Distribución posterior predictiva del p del ANOVA M1–M5; el umbral "
+                "0,05 y el p observado se recalculan desde el XLSX."
+            ),
+        )
+        return summary
 
-def plot_targeted_contrast_panels(
-    axes: Any,
-    display_contrasts: pd.DataFrame,
-    *,
-    color: str,
-) -> None:
-    for axis, variable in zip(axes, ["Biomasa aérea", "Concentración de N"]):
-        group = display_contrasts.loc[
-            display_contrasts["variable"].eq(variable)
-        ].reset_index(drop=True)
-        y = np.arange(len(group))
-        med = group["median"].to_numpy()
-        low = group["lower_95"].to_numpy()
-        high = group["upper_95"].to_numpy()
-        labels = [f"{s} — {d}" for s, d in zip(group["sector"], group["date"])]
-        for estimate, lower, upper, y_position in zip(med, low, high, y, strict=True):
+    def sector_pattern_comparison(self) -> pd.DataFrame:
+        if not self.yield_models:
+            self.fit_yield_models()
+        primary = {
+            fitted.sector: fitted
+            for fitted in self.yield_models.values()
+            if fitted.specification == "primary"
+        }
+        if set(primary) != set(self._require_data().spec.sectors):
+            raise RuntimeError("Falta el modelo principal de algún sector.")
+        draws_by_sector: dict[str, np.ndarray] = {}
+        for sector, fitted in primary.items():
+            means = _flatten_posterior(fitted.inference_data.posterior["mean_yield"])
+            fertilized = means[:, 1:]
+            draws_by_sector[sector] = fertilized[:, :2].mean(axis=1) - fertilized[
+                :, 3:5
+            ].mean(axis=1)
+        sectors = list(self._require_data().spec.sectors)
+        count = min(len(draws_by_sector[sector]) for sector in sectors)
+        difference = (
+            draws_by_sector[sectors[1]][:count] - draws_by_sector[sectors[0]][:count]
+        )
+        rows = [
+            {
+                "estimand": f"early_late_{sectors[1]}_minus_{sectors[0]}",
+                **_quantile_summary(difference),
+                "p_gt_0": float(np.mean(difference > 0.0)),
+                "p_abs_gt_50": float(np.mean(np.abs(difference) > 50.0)),
+                "p_abs_gt_100": float(np.mean(np.abs(difference) > 100.0)),
+                "causal_interpretation": False,
+                "reason": "one physical sector per hydric condition",
+            }
+        ]
+        return self._show("probabilistic_sector_pattern_comparison", pd.DataFrame(rows))
+
+    # ------------------------------------------------------------------
+    # Longitudinal model
+    # ------------------------------------------------------------------
+
+    def _longitudinal_design(
+        self,
+        *,
+        sector: str,
+        outcome: str,
+        response_scale: Literal["raw", "log"],
+    ) -> LongitudinalDesign:
+        data = self._require_data()
+        treatments = tuple(value for value in data.spec.treatments if value != "M0")
+        frame = (
+            data.longitudinal.loc[
+                data.longitudinal["sector"].astype(str).eq(sector)
+                & data.longitudinal["treatment"].astype(str).isin(treatments),
+                ["plot_id", "block", "treatment", "date_label", outcome],
+            ]
+            .dropna(subset=[outcome])
+            .copy()
+        )
+        blocks = tuple(sorted(frame["block"].astype(str).unique()))
+        date_levels = tuple(
+            str(value) for value in frame["date_label"].drop_duplicates()
+        )
+        frame = frame.assign(
+            block=pd.Categorical(
+                frame["block"].astype(str), categories=list(blocks), ordered=True
+            ),
+            treatment=pd.Categorical(
+                frame["treatment"].astype(str),
+                categories=list(treatments),
+                ordered=True,
+            ),
+            date_label=pd.Categorical(
+                frame["date_label"].astype(str),
+                categories=list(date_levels),
+                ordered=True,
+            ),
+        ).reset_index(drop=True)
+        response = frame[outcome].to_numpy(float)
+        if response_scale == "log":
+            if np.any(response <= 0.0):
+                raise ValueError(f"{outcome} contiene valores no positivos.")
+            transformed = np.log(response)
+        else:
+            transformed = response
+        center = float(transformed.mean())
+        scale = float(transformed.std(ddof=1))
+        if not np.isfinite(scale) or scale <= 0.0:
+            raise ValueError(
+                f"No se puede estandarizar {outcome} en {sector} ({response_scale})."
+            )
+        frame["y_z"] = (transformed - center) / scale
+
+        fixed_formula = "1 + C(block, Sum) + C(treatment, Sum) * C(date_label, Sum)"
+        matrix = dmatrix(fixed_formula, frame, return_type="dataframe")
+        names = list(matrix.columns)
+        interaction_mask = np.asarray([":" in name for name in names], dtype=bool)
+        main_mask = ~interaction_mask
+        x_main = np.asarray(matrix.loc[:, main_mask], dtype=float)
+        x_interaction = np.asarray(matrix.loc[:, interaction_mask], dtype=float)
+        main_names = tuple(np.asarray(names)[main_mask].tolist())
+        interaction_names = tuple(np.asarray(names)[interaction_mask].tolist())
+
+        plots = tuple(sorted(frame["plot_id"].astype(str).unique()))
+        plot_index = pd.Categorical(
+            frame["plot_id"].astype(str),
+            categories=list(plots),
+            ordered=True,
+        ).codes
+        prediction_grid = pd.DataFrame(
+            [
+                {"treatment": treatment, "date_label": date_label, "block": block}
+                for treatment in treatments
+                for date_label in date_levels
+                for block in blocks
+            ]
+        )
+        prediction_grid["block"] = pd.Categorical(
+            prediction_grid["block"], categories=list(blocks), ordered=True
+        )
+        prediction_grid["treatment"] = pd.Categorical(
+            prediction_grid["treatment"], categories=list(treatments), ordered=True
+        )
+        prediction_grid["date_label"] = pd.Categorical(
+            prediction_grid["date_label"], categories=list(date_levels), ordered=True
+        )
+        prediction_matrix = np.asarray(
+            build_design_matrices(
+                [matrix.design_info],
+                prediction_grid,
+                return_type="dataframe",
+            )[0],
+            dtype=float,
+        )
+        group_count = len(blocks)
+        prediction_main_rows: list[np.ndarray] = []
+        prediction_interaction_rows: list[np.ndarray] = []
+        compact_grid_rows: list[dict[str, str]] = []
+        for treatment in treatments:
+            for date_label in date_levels:
+                mask = (
+                    prediction_grid["treatment"].astype(str).eq(treatment)
+                    & prediction_grid["date_label"].astype(str).eq(date_label)
+                ).to_numpy()
+                if int(mask.sum()) != group_count:
+                    raise AssertionError("Prediction grid is not balanced over blocks.")
+                averaged = prediction_matrix[mask].mean(axis=0)
+                prediction_main_rows.append(averaged[main_mask])
+                prediction_interaction_rows.append(averaged[interaction_mask])
+                compact_grid_rows.append(
+                    {"treatment": treatment, "date_label": date_label}
+                )
+        return LongitudinalDesign(
+            frame=frame,
+            center=center,
+            scale=scale,
+            response_scale=response_scale,
+            fixed_formula=fixed_formula,
+            design_info=matrix.design_info,
+            x_main=x_main,
+            x_interaction=x_interaction,
+            main_names=main_names,
+            interaction_names=interaction_names,
+            plot_index=plot_index,
+            plots=plots,
+            prediction_grid=pd.DataFrame(compact_grid_rows),
+            prediction_main=np.vstack(prediction_main_rows),
+            prediction_interaction=np.vstack(prediction_interaction_rows),
+            treatments=treatments,
+            date_levels=date_levels,
+            blocks=blocks,
+        )
+
+    def _sample_longitudinal_model(
+        self,
+        *,
+        sector: str,
+        outcome: str,
+        response_scale: Literal["raw", "log"],
+    ) -> FittedModel:
+        design = self._longitudinal_design(
+            sector=sector,
+            outcome=outcome,
+            response_scale=response_scale,
+        )
+        main_prior_sd = np.asarray(
+            [
+                1.5 if name == "Intercept" else 0.75 if "block" in name else 1.0
+                for name in design.main_names
+            ],
+            dtype=float,
+        )
+        coords = {
+            "observation": np.arange(len(design.frame)),
+            "main_coefficient": list(design.main_names),
+            "interaction_coefficient": list(design.interaction_names),
+            "plot": list(design.plots),
+            "prediction_cell": np.arange(len(design.prediction_grid)),
+        }
+        with pm.Model(coords=coords):
+            beta_main = pm.Normal(
+                "beta_main",
+                0.0,
+                main_prior_sd,
+                dims="main_coefficient",
+            )
+            tau_interaction = pm.HalfNormal("tau_interaction", 0.5)
+            interaction_raw = pm.Normal(
+                "interaction_raw",
+                0.0,
+                1.0,
+                dims="interaction_coefficient",
+            )
+            beta_interaction = pm.Deterministic(
+                "beta_interaction",
+                interaction_raw * tau_interaction,
+                dims="interaction_coefficient",
+            )
+            plot_sd = pm.HalfNormal("plot_sd", 0.75)
+            plot_raw = pm.Normal("plot_raw", 0.0, 1.0, dims="plot")
+            plot_effect = pm.Deterministic(
+                "plot_effect",
+                plot_raw * plot_sd,
+                dims="plot",
+            )
+            sigma = pm.HalfNormal("sigma", 1.0)
+            fixed_mu = pt_api.dot(design.x_main, beta_main) + pt_api.dot(
+                design.x_interaction, beta_interaction
+            )
+            mu = fixed_mu + plot_effect[design.plot_index]
+            pm.StudentT(
+                "y_obs",
+                nu=STUDENT_T_DF,
+                mu=mu,
+                sigma=sigma,
+                observed=design.frame["y_z"].to_numpy(float),
+                dims="observation",
+            )
+            prediction_z = pt_api.dot(design.prediction_main, beta_main) + pt_api.dot(
+                design.prediction_interaction, beta_interaction
+            )
+            transformed = design.center + design.scale * prediction_z
+            prediction = (
+                pt_api.exp(transformed) if response_scale == "log" else transformed
+            )
+            pm.Deterministic(
+                "typical_value",
+                prediction,
+                dims="prediction_cell",
+            )
+            inference = pm.sample(
+                draws=self.draws,
+                tune=self.tune,
+                chains=self.chains,
+                cores=self.cores,
+                target_accept=self.target_accept,
+                random_seed=_stable_seed(
+                    sector,
+                    outcome,
+                    response_scale,
+                    base=self.random_seed,
+                ),
+                return_inferencedata=True,
+                idata_kwargs={"log_likelihood": True},
+            )
+            posterior_predictive = pm.sample_posterior_predictive(
+                inference,
+                var_names=["y_obs"],
+                random_seed=_stable_seed(
+                    sector,
+                    outcome,
+                    response_scale,
+                    "posterior_predictive",
+                    base=self.random_seed,
+                ),
+                return_inferencedata=True,
+            )
+        inference.extend(posterior_predictive)
+        model_id = f"longitudinal_{sector.casefold()}_{outcome}_{response_scale}"
+        return FittedModel(
+            model_id=model_id,
+            sector=sector,
+            outcome=outcome,
+            specification=response_scale,
+            inference_data=inference,
+            design=design,
+        )
+
+    def fit_longitudinal_models(self) -> pd.DataFrame:
+        data = self._require_data()
+        specifications: list[tuple[str, Literal["raw", "log"]]] = [
+            ("biomass_kg_ha", "raw"),
+            ("biomass_kg_ha", "log"),
+            ("n_pct", "raw"),
+        ]
+        rows: list[dict[str, object]] = []
+        for sector in data.spec.sectors:
+            for outcome, response_scale in specifications:
+                fitted = self._sample_longitudinal_model(
+                    sector=sector,
+                    outcome=outcome,
+                    response_scale=response_scale,
+                )
+                self.longitudinal_models[fitted.model_id] = fitted
+                rows.append(
+                    {
+                        "model_id": fitted.model_id,
+                        "sector": sector,
+                        "outcome": outcome,
+                        "response_scale": response_scale,
+                        "draws": self.draws,
+                        "tune": self.tune,
+                        "chains": self.chains,
+                    }
+                )
+        return self._show("longitudinal_model_runs", pd.DataFrame(rows))
+
+    @staticmethod
+    def _longitudinal_diagnostic_summary(fitted: FittedModel) -> dict[str, object]:
+        summary = az.summary(
+            fitted.inference_data,
+            var_names=[
+                "beta_main",
+                "tau_interaction",
+                "beta_interaction",
+                "plot_sd",
+                "sigma",
+            ],
+            round_to=None,
+        )
+        divergences = int(
+            np.asarray(fitted.inference_data.sample_stats["diverging"]).sum()
+        )
+        return {
+            "model_id": fitted.model_id,
+            "sector": fitted.sector,
+            "outcome": fitted.outcome,
+            "response_scale": fitted.specification,
+            "max_rhat": float(summary["r_hat"].max()),
+            "min_ess_bulk": float(summary["ess_bulk"].min()),
+            "min_ess_tail": float(summary["ess_tail"].min()),
+            "divergences": divergences,
+            "accepted": bool(
+                summary["r_hat"].max() <= 1.01
+                and summary["ess_bulk"].min() >= 400
+                and divergences == 0
+            ),
+        }
+
+    def longitudinal_diagnostics(self) -> pd.DataFrame:
+        if not self.longitudinal_models:
+            self.fit_longitudinal_models()
+        rows = [
+            self._longitudinal_diagnostic_summary(model)
+            for model in self.longitudinal_models.values()
+        ]
+        return self._show("longitudinal_model_diagnostics", pd.DataFrame(rows))
+
+    def _longitudinal_summary_for_model(
+        self,
+        fitted: FittedModel,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        design = cast(LongitudinalDesign, fitted.design)
+        values = _flatten_posterior(fitted.inference_data.posterior["typical_value"])
+        trajectory_rows: list[dict[str, object]] = []
+        for index, (_, row) in enumerate(
+            design.prediction_grid.reset_index(drop=True).iterrows()
+        ):
+            trajectory_rows.append(
+                {
+                    "sector": fitted.sector,
+                    "outcome": fitted.outcome,
+                    "response_scale": fitted.specification,
+                    "treatment": row["treatment"],
+                    "date_label": row["date_label"],
+                    "estimand": (
+                        "geometric_typical_value"
+                        if fitted.specification == "log"
+                        else "arithmetic_mean_location"
+                    ),
+                    **_quantile_summary(values[:, index]),
+                }
+            )
+
+        cell_index = {
+            (str(row.treatment), str(row.date_label)): index
+            for index, row in enumerate(design.prediction_grid.itertuples(index=False))
+        }
+        contrast_rows: list[dict[str, object]] = []
+        early_late_by_date: dict[str, np.ndarray] = {}
+        for date_label in design.date_levels:
+            early = 0.5 * (
+                values[:, cell_index[("M1", date_label)]]
+                + values[:, cell_index[("M2", date_label)]]
+            )
+            late = 0.5 * (
+                values[:, cell_index[("M4", date_label)]]
+                + values[:, cell_index[("M5", date_label)]]
+            )
+            difference = early - late
+            early_late_by_date[date_label] = difference
+            contrast_rows.append(
+                {
+                    "sector": fitted.sector,
+                    "outcome": fitted.outcome,
+                    "response_scale": fitted.specification,
+                    "estimand": "mean_M1_M2_minus_mean_M4_M5",
+                    "date_label": date_label,
+                    **_quantile_summary(difference),
+                    "p_gt_0": float(np.mean(difference > 0.0)),
+                }
+            )
+        first = early_late_by_date[design.date_levels[0]]
+        last = early_late_by_date[design.date_levels[-1]]
+        change = last - first
+        contrast_rows.append(
+            {
+                "sector": fitted.sector,
+                "outcome": fitted.outcome,
+                "response_scale": fitted.specification,
+                "estimand": "change_in_early_late_first_to_last",
+                "date_label": f"{design.date_levels[-1]} minus {design.date_levels[0]}",
+                **_quantile_summary(change),
+                "p_gt_0": float(np.mean(change > 0.0)),
+            }
+        )
+        return pd.DataFrame(trajectory_rows), pd.DataFrame(contrast_rows)
+
+    def longitudinal_summaries(self) -> pd.DataFrame:
+        if not self.longitudinal_models:
+            self.fit_longitudinal_models()
+        trajectories: list[pd.DataFrame] = []
+        contrasts: list[pd.DataFrame] = []
+        for fitted in self.longitudinal_models.values():
+            trajectory, contrast = self._longitudinal_summary_for_model(fitted)
+            trajectories.append(trajectory)
+            contrasts.append(contrast)
+        trajectory_table = pd.concat(trajectories, ignore_index=True)
+        contrast_table = pd.concat(contrasts, ignore_index=True)
+        self.tables["longitudinal_posterior_contrasts"] = contrast_table
+        self._show("longitudinal_posterior_trajectories", trajectory_table)
+
+        data = self._require_data()
+        for outcome, response_scale in [
+            ("biomass_kg_ha", "raw"),
+            ("n_pct", "raw"),
+        ]:
+            subset = trajectory_table.loc[
+                trajectory_table["outcome"].eq(outcome)
+                & trajectory_table["response_scale"].eq(response_scale)
+            ]
+            fig, axes = plt.subplots(
+                1, len(data.spec.sectors), figsize=(12.2, 5.2), sharey=True
+            )
+            axes_array = np.atleast_1d(axes)
+            colors = dict(
+                zip([f"M{i}" for i in range(1, 6)], self.palette[1:6], strict=True)
+            )
+            for axis, sector in zip(axes_array, data.spec.sectors, strict=True):
+                sector_data = subset.loc[subset["sector"].eq(sector)]
+                date_levels = sector_data["date_label"].drop_duplicates().tolist()
+                date_centers = np.arange(len(date_levels), dtype=float)
+                positions = dict(zip(date_levels, date_centers, strict=True))
+                treatment_offsets = dict(
+                    zip(
+                        colors,
+                        np.linspace(-0.28, 0.28, len(colors)),
+                        strict=True,
+                    )
+                )
+                for treatment, color in colors.items():
+                    treatment_data = sector_data.loc[
+                        sector_data["treatment"].eq(treatment)
+                    ]
+                    x = [
+                        positions[label] + treatment_offsets[treatment]
+                        for label in treatment_data["date_label"]
+                    ]
+                    axis.errorbar(
+                        x,
+                        treatment_data["median"],
+                        yerr=np.vstack(
+                            [
+                                treatment_data["median"] - treatment_data["lower_95"],
+                                treatment_data["upper_95"] - treatment_data["median"],
+                            ]
+                        ),
+                        marker="o",
+                        linestyle="none",
+                        markersize=MARKER_SIZE,
+                        capsize=ERRORBAR_CAPSIZE,
+                        elinewidth=INTERVAL_LINEWIDTH,
+                        label=treatment,
+                        color=color,
+                    )
+                treatment_positions = [
+                    center + treatment_offsets[treatment]
+                    for center in date_centers
+                    for treatment in colors
+                ]
+                axis.set_xticks(
+                    treatment_positions,
+                    list(colors) * len(date_centers),
+                    minor=True,
+                )
+                axis.tick_params(axis="x", which="minor", pad=5, length=0)
+                axis.set_xticks(date_centers, date_levels)
+                axis.tick_params(axis="x", which="major", pad=25, length=0)
+                axis.set_title(sector.upper())
+                axis.set_xlabel("")
+                axis.grid(alpha=0.22)
+            y_label = (
+                "Biomasa posterior (kg MS ha⁻¹)"
+                if outcome == "biomass_kg_ha"
+                else "Concentración posterior de N (%)"
+            )
+            axes_array[0].set_ylabel(y_label)
+            fig.subplots_adjust(
+                left=0.08,
+                right=0.98,
+                bottom=0.23,
+                top=0.72,
+                wspace=0.12,
+            )
+            self._save_figure(
+                fig,
+                f"longitudinal_{outcome}_{response_scale}",
+                title=(
+                    "Biomasa posterior en las tres fechas de muestreo"
+                    if outcome == "biomass_kg_ha"
+                    else "Concentración de N posterior en las tres fechas de muestreo"
+                ),
+                subtitle=(
+                    "Mediana posterior e intervalo creíble del 95 % para M1–M5; "
+                    "bloque fijo e intercepto aleatorio por parcela."
+                ),
+                note=(
+                    "Las fechas son categorías equidistantes; los tratamientos se agrupan "
+                    "dentro de cada fecha y los puntos no se conectan. M0 no forma parte del modelo."
+                ),
+            )
+        return trajectory_table
+
+    # ------------------------------------------------------------------
+    # Reconstruction null and synthesis
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _reconstruction_null_table(
+        harvest: pd.DataFrame,
+        *,
+        permutations: int,
+        seed: int,
+    ) -> pd.DataFrame:
+        rng = np.random.default_rng(seed)
+        rows: list[dict[str, object]] = []
+        for sector in harvest["sector"].astype(str).drop_duplicates():
+            sector_frame = harvest.loc[harvest["sector"].astype(str).eq(sector)].copy()
+            for pattern, include_m0 in (("all_m0_m5", True), ("timing_m1_m5", False)):
+                subset = (
+                    sector_frame
+                    if include_m0
+                    else sector_frame.loc[
+                        sector_frame["treatment"].astype(str).ne("M0")
+                    ]
+                )
+                observed = float(
+                    stats.pearsonr(
+                        subset["panicle_density_m2"],
+                        subset["estimated_seeds_per_panicle"],
+                    ).statistic
+                )
+                panicle_density = subset["panicle_density_m2"].to_numpy(float)
+                panicle_count = subset["panicle_count"].to_numpy(float)
+                estimated_seed_count = subset["estimated_seed_count"].to_numpy(float)
+                null = np.empty(permutations)
+                for index in range(permutations):
+                    reconstructed = (
+                        rng.permutation(estimated_seed_count) / panicle_count
+                    )
+                    null[index] = float(
+                        stats.pearsonr(panicle_density, reconstructed).statistic
+                    )
+                median = float(np.median(null))
+                rows.append(
+                    {
+                        "sector": sector,
+                        "pattern": pattern,
+                        "n": len(subset),
+                        "permutations": permutations,
+                        "observed_correlation": observed,
+                        "null_median": median,
+                        "null_lower_95": float(np.quantile(null, 0.025)),
+                        "null_upper_95": float(np.quantile(null, 0.975)),
+                        "observed_percentile_in_null": float(np.mean(null <= observed)),
+                        "two_sided_tail_around_null_median": float(
+                            (
+                                1
+                                + np.sum(
+                                    np.abs(null - median) >= abs(observed - median)
+                                )
+                            )
+                            / (permutations + 1)
+                        ),
+                    }
+                )
+        return pd.DataFrame(rows)
+
+    def reconstruction_null(self, *, permutations: int = 10000) -> pd.DataFrame:
+        table = self._reconstruction_null_table(
+            self._require_data().harvest,
+            permutations=permutations,
+            seed=_stable_seed("reconstruction_null", base=self.random_seed),
+        )
+        self._show("reconstruction_null", table)
+        plot_table = table.iloc[::-1].reset_index(drop=True)
+        fig, axis = plt.subplots(figsize=(10.4, 5.2))
+        y = np.arange(len(plot_table))
+        null_y = y + 0.09
+        observed_y = y - 0.09
+        for index, (_, row) in enumerate(plot_table.iterrows()):
             plot_horizontal_interval(
                 axis,
-                estimate=float(estimate),
-                lower=float(lower),
-                upper=float(upper),
-                y=float(y_position),
-                color=color,
+                estimate=float(row["null_median"]),
+                lower=float(row["null_lower_95"]),
+                upper=float(row["null_upper_95"]),
+                y=float(null_y[index]),
+                color=self.palette[1],
+                label=(
+                    "Nulo de reconstrucción: mediana e IC 95 %" if index == 0 else None
+                ),
             )
-        axis.axvline(0, linewidth=REFERENCE_LINEWIDTH)
-        axis.set_yticks(y, labels)
+        axis.scatter(
+            plot_table["observed_correlation"],
+            observed_y,
+            marker="o",
+            s=62,
+            facecolors="white",
+            edgecolors="0.20",
+            linewidths=DATA_LINEWIDTH,
+            zorder=4,
+            label="Correlación observada",
+        )
+        axis.axvline(0.0, linewidth=REFERENCE_LINEWIDTH)
+        axis.set_yticks(
+            y,
+            plot_table["sector"].astype(str)
+            + " — "
+            + plot_table["pattern"].map(
+                {"all_m0_m5": "M0–M5", "timing_m1_m5": "M1–M5"}
+            ),
+        )
+        axis.set_xlabel("Correlación panojas–semillas estimadas por panoja")
         axis.grid(axis="x", alpha=0.22)
-        axis.set_title(variable)
-        axis.set_xlabel(
-            "Diferencia de biomasa (kg MS/ha)"
-            if variable == "Biomasa aérea"
-            else "Diferencia de concentración de N (puntos porcentuales)"
+        axis.legend(loc="lower right", bbox_to_anchor=(1.0, 1.02), ncol=2)
+        fig.subplots_adjust(left=0.30, right=0.98, bottom=0.17, top=0.72)
+        self._save_figure(
+            fig,
+            "reconstruction_null",
+            title="Asociación observada frente al nulo de reconstrucción",
+            subtitle=(
+                "Círculos llenos y barras: mediana e intervalo nulo del 95 %. "
+                "Círculos vacíos: correlación observada."
+            ),
+            note="El nulo de cuatro filas se vuelve a generar desde las mediciones actuales del XLSX.",
         )
+        return table
 
+    def synthesis(self) -> pd.DataFrame:
+        yield_diagnostics = self.tables.get("yield_model_diagnostics")
+        if yield_diagnostics is None:
+            yield_diagnostics = self.yield_diagnostics()
+        longitudinal_diagnostics = self.tables.get("longitudinal_model_diagnostics")
+        if longitudinal_diagnostics is None:
+            longitudinal_diagnostics = self.longitudinal_diagnostics()
+        if "yield_posterior_estimands" not in self.tables:
+            self.yield_posterior_summaries()
+        if "longitudinal_posterior_contrasts" not in self.tables:
+            self.longitudinal_summaries()
+        if "reconstruction_null" not in self.tables:
+            self.reconstruction_null()
 
-def make_figures(
-    *,
-    yield_data: pd.DataFrame,
-    treatment_means: pd.DataFrame,
-    margins: pd.DataFrame,
-    ranks: pd.DataFrame,
-    estimands: pd.DataFrame,
-    sector_comparison: pd.DataFrame,
-    leave_one_out: pd.DataFrame,
-    ppc_draws: pd.DataFrame,
-    trajectories: pd.DataFrame,
-    longitudinal_contrasts: pd.DataFrame,
-    model_b_states: pd.DataFrame,
-    reconstruction_null: pd.DataFrame,
-) -> None:
-    palette = apply_plot_theme()
-    treatment_colors = dict(zip(TREATMENTS, palette[: len(TREATMENTS)], strict=True))
-
-    # 1. Observed yield + corrected posterior means.
-    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.2), sharey=True)
-    plot_observed_yield_panels(
-        axes,
-        yield_data=yield_data,
-        treatment_means=treatment_means,
-        treatment_colors=treatment_colors,
-    )
-    axes[0].set_ylabel("Rendimiento de semilla limpia (kg/ha)")
-    handles, labels = axes[1].get_legend_handles_labels()
-    add_figure_header(
-        fig,
-        "Rendimiento observado y estimación posterior corregida",
-        subtitle=(
-            "Puntos claros: parcelas observadas. Círculos y barras: media posterior "
-            "e intervalo creíble del 95 %."
-        ),
-    )
-    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.83))
-    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.15, top=0.70, wspace=0.12)
-    save_figure(fig, "01_yield_observed_posterior")
-
-    # 2. Practical-margin sensitivity by prior.
-    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.2), sharey=True)
-    plot_margin_panels(
-        axes,
-        margins,
-        principal_color=palette[3],
-    )
-    axes[0].set_ylabel("P(rango M1–M5 > δ | datos)")
-    add_figure_header(
-        fig,
-        "La conclusión depende del margen práctico y de la regularización",
-        subtitle=(
-            "Curva principal destacada; las tres curvas grises son sensibilidades "
-            "alternativas. La línea vertical marca 100 kg ha⁻¹."
-        ),
-    )
-    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.15, top=0.76, wspace=0.12)
-    save_figure(fig, "02_margin_prior_sensitivity")
-
-    # 3. Near-optimal probabilities under the primary prior.
-    primary_ranks = ranks.loc[ranks["specification"].eq("Principal")].copy()
-    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.0), sharey=True)
-    plot_near_optimal_panels(
-        axes,
-        primary_ranks,
-        treatment_colors=treatment_colors,
-    )
-    axes[0].set_ylabel("P(a ≤100 kg/ha del mejor | datos)")
-    add_figure_header(
-        fig,
-        "Probabilidad de rendimiento prácticamente cercano al mejor",
-        subtitle=(
-            "Probabilidad posterior de quedar a no más de 100 kg ha⁻¹ del mejor "
-            "calendario fertilizado."
-        ),
-    )
-    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.15, top=0.76, wspace=0.12)
-    save_figure(fig, "03_near_optimal_probabilities")
-
-    # 4. Early-late yield contrasts and sector difference.
-    primary_estimands = estimands.loc[
-        estimands["specification"].eq("Principal")
-        & estimands["estimand"].eq("M1–M2 menos M4–M5")
-    ].copy()
-    labels, values = yield_contrast_plot_data(
-        primary_estimands,
-        sector_comparison,
-    )
-    fig, axis = plt.subplots(figsize=(8.8, 4.8))
-    y = np.arange(len(labels))
-    med = np.array([item[0] for item in values])
-    low = np.array([item[1] for item in values])
-    high = np.array([item[2] for item in values])
-    for estimate, lower, upper, y_position in zip(med, low, high, y, strict=True):
-        plot_horizontal_interval(
-            axis,
-            estimate=float(estimate),
-            lower=float(lower),
-            upper=float(upper),
-            y=float(y_position),
-            color=palette[1],
+        accepted_yield = set(
+            yield_diagnostics.loc[
+                yield_diagnostics["specification"].eq("primary")
+                & yield_diagnostics["accepted"],
+                "sector",
+            ]
         )
-    axis.axvline(0.0, linewidth=REFERENCE_LINEWIDTH)
-    axis.axvline(100.0, linestyle="--", linewidth=REFERENCE_LINEWIDTH)
-    axis.axvline(-100.0, linestyle="--", linewidth=REFERENCE_LINEWIDTH)
-    axis.set_yticks(y, labels)
-    axis.set_xlabel("Contraste de rendimiento (kg/ha)")
-    axis.grid(axis="x", alpha=0.22)
-    add_figure_header(
-        fig,
-        "Tempranos M1–M2 versus tardíos M4–M5",
-        subtitle=(
-            "Mediana posterior e intervalo creíble del 95 %; las líneas punteadas "
-            "marcan ±100 kg ha⁻¹."
-        ),
-    )
-    fig.subplots_adjust(left=0.19, right=0.98, bottom=0.17, top=0.75)
-    save_figure(fig, "04_early_late_sector_contrast")
+        accepted_longitudinal = {
+            (record.sector, record.outcome, record.response_scale)
+            for record in longitudinal_diagnostics.loc[
+                longitudinal_diagnostics["accepted"]
+            ].itertuples(index=False)
+        }
+        rows: list[dict[str, object]] = []
 
-    # 5. Leave-one-block-out sensitivity.
-    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.0), sharey=True)
-    plot_leave_one_out_panels(
-        axes,
-        leave_one_out=leave_one_out,
-        margins=margins,
-    )
-    axes[0].set_ylabel("P(rango M1–M5 >100 kg/ha)")
-    axes[1].legend(loc="best")
-    add_figure_header(
-        fig,
-        "Sensibilidad al dejar afuera un bloque",
-        subtitle=(
-            "Cada punto omite un bloque; la línea punteada muestra el ajuste con "
-            "todos los bloques."
-        ),
-    )
-    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.15, top=0.76, wspace=0.12)
-    save_figure(fig, "05_leave_one_block_out")
+        yield_estimands = self.tables["yield_posterior_estimands"]
+        for record in yield_estimands.loc[
+            yield_estimands["specification"].eq("primary")
+        ].itertuples(index=False):
+            rows.append(
+                {
+                    "domain": "yield",
+                    "sector": record.sector,
+                    "estimand": record.estimand,
+                    "median": record.median,
+                    "lower_95": record.lower_95,
+                    "upper_95": record.upper_95,
+                    "probability": record.p_gt_0,
+                    "usable": record.sector in accepted_yield,
+                    "interpretation_rule": (
+                        "do_not_claim_equivalence_without_prespecified_margin"
+                        if record.estimand == "range_M1_M5"
+                        else "report_posterior_interval_and_probability"
+                    ),
+                }
+            )
 
-    # 6. Posterior predictive classical p-values.
-    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.2), sharey=True)
-    plot_ppc_panels(axes, ppc_draws)
-    axes[0].set_ylabel("Densidad")
-    handles, labels = axes[1].get_legend_handles_labels()
-    add_figure_header(
-        fig,
-        "Qué produciría nuevamente el análisis convencional",
-        subtitle=(
-            "Distribución posterior predictiva del p del ANOVA M1–M5; se muestran "
-            "el umbral 0,05 y el p observado."
-        ),
-    )
-    fig.legend(
-        handles,
-        labels,
-        loc="upper center",
-        bbox_to_anchor=(0.5, 0.83),
-        ncol=2,
-    )
-    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.17, top=0.69, wspace=0.12)
-    save_figure(fig, "06_posterior_predictive_anova")
+        longitudinal = self.tables["longitudinal_posterior_contrasts"]
+        for record in longitudinal.itertuples(index=False):
+            key = (record.sector, record.outcome, record.response_scale)
+            rows.append(
+                {
+                    "domain": "trajectory",
+                    "sector": record.sector,
+                    "estimand": (
+                        f"{record.outcome}|{record.response_scale}|"
+                        f"{record.estimand}|{record.date_label}"
+                    ),
+                    "median": record.median,
+                    "lower_95": record.lower_95,
+                    "upper_95": record.upper_95,
+                    "probability": record.p_gt_0,
+                    "usable": key in accepted_longitudinal,
+                    "interpretation_rule": (
+                        "date_specific_posterior_contrast_on_declared_scale"
+                        if record.estimand == "mean_M1_M2_minus_mean_M4_M5"
+                        else "posterior_change_in_targeted_contrast_not_global_interaction_test"
+                    ),
+                }
+            )
 
-    # 7. Longitudinal biomass trajectories.
-    biomass = trajectories.loc[trajectories["variable"].eq("Biomasa aérea")]
-    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.7), sharey=True)
-    plot_trajectory_panels(
-        axes,
-        biomass,
-        value_column="median",
-        y_label="Biomasa típica posterior (kg MS/ha)",
-        treatment_colors=treatment_colors,
-    )
-    add_figure_header(
-        fig,
-        "Biomasa posterior en las tres fechas de muestreo",
-        subtitle="Mediana posterior e intervalo creíble del 95 % para cada calendario.",
-    )
-    add_figure_note(
-        fig,
-        "Las fechas se muestran como categorías equidistantes; los puntos no se conectan.",
-    )
-    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.23, top=0.76, wspace=0.12)
-    save_figure(fig, "07_longitudinal_biomass")
-
-    # 8. Longitudinal N concentration trajectories.
-    n_conc = trajectories.loc[trajectories["variable"].eq("Concentración de N")]
-    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.7), sharey=True)
-    plot_trajectory_panels(
-        axes,
-        n_conc,
-        value_column="median",
-        y_label="Concentración típica posterior de N (%)",
-        treatment_colors=treatment_colors,
-    )
-    add_figure_header(
-        fig,
-        "Concentración de N posterior en las tres fechas de muestreo",
-        subtitle="Mediana posterior e intervalo creíble del 95 % para cada calendario.",
-    )
-    add_figure_note(
-        fig,
-        "Las fechas se muestran como categorías equidistantes; los puntos no se conectan.",
-    )
-    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.23, top=0.76, wspace=0.12)
-    save_figure(fig, "08_longitudinal_n_concentration")
-
-    # 9. Targeted longitudinal contrasts.
-    display_contrasts = longitudinal_contrasts.loc[
-        (
-            (longitudinal_contrasts["variable"].eq("Biomasa aérea"))
-            & longitudinal_contrasts["date"].eq("Sep")
+        reconstruction = self.tables["reconstruction_null"]
+        for record in reconstruction.itertuples(index=False):
+            rows.append(
+                {
+                    "domain": "yield_components",
+                    "sector": record.sector,
+                    "estimand": f"reconstruction_null_{record.pattern}",
+                    "median": record.observed_correlation,
+                    "lower_95": record.null_lower_95,
+                    "upper_95": record.null_upper_95,
+                    "probability": record.two_sided_tail_around_null_median,
+                    "usable": True,
+                    "interpretation_rule": (
+                        "not_independent_evidence_of_compensation_when_inside_null"
+                    ),
+                }
+            )
+        rows.append(
+            {
+                "domain": "scope",
+                "sector": "both_observed_sectors",
+                "estimand": "hydric_condition",
+                "median": np.nan,
+                "lower_95": np.nan,
+                "upper_95": np.nan,
+                "probability": np.nan,
+                "usable": True,
+                "interpretation_rule": (
+                    "descriptive_not_causal_one_sector_per_condition"
+                ),
+            }
         )
-        | (
-            (longitudinal_contrasts["variable"].eq("Concentración de N"))
-            & longitudinal_contrasts["date"].isin(["Oct", "Nov"])
-        )
-    ].copy()
-    display_contrasts["label"] = (
-        display_contrasts["sector"]
-        + " — "
-        + display_contrasts["variable"]
-        + " — "
-        + display_contrasts["date"]
-    )
-    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.7))
-    plot_targeted_contrast_panels(
-        axes,
-        display_contrasts,
-        color=palette[1],
-    )
-    add_figure_header(
-        fig,
-        "Contrastes temporales dirigidos por hipótesis",
-        subtitle=(
-            "Mediana posterior e intervalo creíble del 95 %; la línea vertical "
-            "marca una diferencia nula."
-        ),
-    )
-    fig.subplots_adjust(left=0.13, right=0.98, bottom=0.17, top=0.76, wspace=0.42)
-    save_figure(fig, "09_targeted_longitudinal_contrasts")
+        return self._show("probabilistic_synthesis", pd.DataFrame(rows))
 
-    # 10. Model B NNI trajectories (exploratory support).
-    nni = model_b_states.loc[model_b_states["variable"].eq("nni_revised")]
-    fig, axes = plt.subplots(1, 2, figsize=(12.2, 5.7), sharey=True)
-    plot_trajectory_panels(
-        axes,
-        nni,
-        value_column="posterior_median",
-        y_label="INN revisado latente",
-        treatment_colors=treatment_colors,
-        reference=1.0,
-    )
-    add_figure_header(
-        fig,
-        "Modelo B: INN latente en las tres fechas de muestreo",
-        subtitle=(
-            "Mediana posterior e intervalo creíble del 95 %; la línea horizontal "
-            "marca INN = 1."
-        ),
-    )
-    add_figure_note(
-        fig,
-        "Resultado de apoyo. Las fechas son categorías equidistantes y los puntos no se conectan.",
-    )
-    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.23, top=0.76, wspace=0.12)
-    save_figure(fig, "10_model_b_nni")
+    def export_artifacts(self) -> pd.DataFrame:
+        if not self.export_results:
+            return self._show(
+                "probabilistic_export_manifest",
+                pd.DataFrame(
+                    [{"status": "export_disabled", "directory": str(self.results_dir)}]
+                ),
+            )
+        self.tables_dir.mkdir(parents=True, exist_ok=True)
+        self.posteriors_dir.mkdir(parents=True, exist_ok=True)
+        rows: list[dict[str, object]] = []
+        for name, table in sorted(self.tables.items()):
+            path = self.tables_dir / f"{name}.csv"
+            table.to_csv(path, index=False)
+            rows.append(
+                {
+                    "artifact_type": "table",
+                    "name": name,
+                    "path": str(path),
+                    "rows": len(table),
+                }
+            )
+        for fitted in [*self.yield_models.values(), *self.longitudinal_models.values()]:
+            path = self.posteriors_dir / f"{fitted.model_id}.nc"
+            fitted.inference_data.to_netcdf(path)
+            rows.append(
+                {
+                    "artifact_type": "posterior",
+                    "name": fitted.model_id,
+                    "path": str(path),
+                    "rows": np.nan,
+                }
+            )
+        if self.figure_metadata:
+            path = self.results_dir / "figure_manifest.json"
+            path.write_text(
+                json.dumps(self.figure_metadata, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            rows.append(
+                {
+                    "artifact_type": "figure_manifest",
+                    "name": "figure_manifest",
+                    "path": str(path),
+                    "rows": len(self.figure_metadata),
+                }
+            )
+        return self._show("probabilistic_export_manifest", pd.DataFrame(rows))
 
-    # 11. Reconstruction-null observed vs null interval.
-    table = reconstruction_null.copy().iloc[::-1].reset_index(drop=True)
-    fig, axis = plt.subplots(figsize=(10.4, 5.2))
-    y = np.arange(len(table))
-    null_median = table["null_median"].to_numpy()
-    null_low = table["null_lower_95"].to_numpy()
-    null_high = table["null_upper_95"].to_numpy()
-    observed = table["observed_correlation"].to_numpy()
-    null_y = y + 0.09
-    observed_y = y - 0.09
-    for index, (estimate, lower, upper, y_position) in enumerate(
-        zip(null_median, null_low, null_high, null_y, strict=True)
-    ):
-        plot_horizontal_interval(
-            axis,
-            estimate=float(estimate),
-            lower=float(lower),
-            upper=float(upper),
-            y=float(y_position),
-            color=palette[1],
-            label=("Nulo de reconstrucción: mediana e IC 95 %" if index == 0 else None),
-        )
-    axis.scatter(
-        observed,
-        observed_y,
-        marker="o",
-        s=62,
-        facecolors="white",
-        edgecolors="0.20",
-        linewidths=DATA_LINEWIDTH,
-        zorder=4,
-        label="Correlación observada",
-    )
-    axis.axvline(0.0, linewidth=REFERENCE_LINEWIDTH)
-    axis.set_yticks(y, table["pattern"])
-    axis.set_xlabel("Correlación panojas–semillas estimadas por panoja")
-    axis.grid(axis="x", alpha=0.22)
-    axis.legend(
-        loc="lower right",
-        bbox_to_anchor=(1.0, 1.02),
-        ncol=2,
-    )
-    add_figure_header(
-        fig,
-        "Asociación observada frente al nulo de reconstrucción",
-        subtitle=(
-            "Círculos llenos y barras: mediana e intervalo nulo del 95 %. "
-            "Círculos vacíos: correlación observada."
-        ),
-    )
-    fig.subplots_adjust(left=0.28, right=0.98, bottom=0.17, top=0.76)
-    save_figure(fig, "11_reconstruction_null")
+    def run_all(self) -> None:
+        self.configuration()
+        self.load_data()
+        self.source_provenance()
+        self.source_audit()
+        self.variable_lineage()
+        self.model_specification()
+        self.conditional_prior_predictive()
+        self.fit_yield_models()
+        self.yield_diagnostics()
+        self.yield_posterior_summaries()
+        self.margin_sensitivity()
+        self.posterior_predictive_checks()
+        self.sector_pattern_comparison()
+        self.fit_longitudinal_models()
+        self.longitudinal_diagnostics()
+        self.longitudinal_summaries()
+        self.reconstruction_null()
+        self.synthesis()
+        self.export_artifacts()
+
+
+def run_all() -> ProbabilisticAnnex:
+    """Compatibility entry point used by the command-line wrapper."""
+
+    annex = ProbabilisticAnnex(figure_profile="standalone")
+    annex.run_all()
+    return annex
+
+
+def run_all_cli() -> None:
+    import matplotlib
+
+    matplotlib.use("Agg", force=True)
+    run_all()
 
 
 if __name__ == "__main__":

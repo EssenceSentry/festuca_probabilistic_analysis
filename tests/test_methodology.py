@@ -1,43 +1,24 @@
 from __future__ import annotations
 
-import io
+import ast
 import json
-import tempfile
+import re
 import unittest
-from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 from unittest.mock import patch
 
-import matplotlib as mpl
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.colors import to_hex
+import statsmodels.formula.api as smf  # pyright: ignore[reportMissingTypeStubs]
+from openpyxl import load_workbook
 
-from festuca_analysis.annex import (
-    TREATMENTS,
-    logp_log_tau,
-    make_design,
-    prior_predictive_summary,
-    prior_specification_table,
-)
 from festuca_analysis.longitudinal import (
-    COMMON_N_APPLICATIONS,
-    COMMON_N_TOTAL_KG_HA,
-    EXPERIMENTAL_N_TOTAL_KG_HA,
+    LongitudinalNotebook,
+    _stable_seed,  # pyright: ignore[reportPrivateUsage]
 )
-from festuca_analysis.plotting import (
-    DATA_LINEWIDTH,
-    ERRORBAR_CAPSIZE,
-    GRID_LINEWIDTH,
-    INTERVAL_LINEWIDTH,
-    PLOT_FONT_FAMILY,
-    REFERENCE_LINEWIDTH,
-    FigureExporter,
-    apply_plot_theme,
-)
+from festuca_analysis.source_data import load_experiment_data, sha256_file
 from festuca_analysis.statistics import (
     benjamini_hochberg,
     fit_mixedlm_best,
@@ -45,106 +26,143 @@ from festuca_analysis.statistics import (
     rcbd_missing_cell_estimate,
 )
 
-
-class PlotThemeTests(unittest.TestCase):
-    def test_seaborn_theme_exposes_inferno_palette_and_line_hierarchy(self) -> None:
-        mpl_api = cast(Any, mpl)
-        with mpl_api.rc_context():
-            palette = apply_plot_theme()
-            cycle = mpl_api.rcParams["axes.prop_cycle"].by_key()["color"]
-            self.assertEqual(len(palette), 9)
-            self.assertEqual([to_hex(color) for color in cycle[:9]], palette)
-            self.assertEqual(mpl_api.rcParams["axes.grid.axis"], "y")
-            self.assertEqual(mpl_api.rcParams["font.family"], [PLOT_FONT_FAMILY])
-            self.assertEqual(mpl_api.rcParams["lines.linewidth"], DATA_LINEWIDTH)
-            self.assertEqual(mpl_api.rcParams["errorbar.capsize"], ERRORBAR_CAPSIZE)
-            self.assertEqual(mpl_api.rcParams["grid.linewidth"], GRID_LINEWIDTH)
-            self.assertGreater(DATA_LINEWIDTH, INTERVAL_LINEWIDTH)
-            self.assertGreater(INTERVAL_LINEWIDTH, REFERENCE_LINEWIDTH)
-            self.assertFalse(mpl_api.rcParams["axes.spines.top"])
-            self.assertFalse(mpl_api.rcParams["axes.spines.right"])
-
-    def test_standalone_export_preserves_embedded_header_and_png(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            output_directory = Path(temporary_directory)
-            exporter = FigureExporter(output_directory, profile="standalone", dpi=72)
-            figure, _axis = plt.subplots(figsize=(2.0, 1.5))
-            exporter.add_header(figure, "Título M1–M5", subtitle="IC del 95 % ±")
-            exporter.add_note(figure, "Nota")
-            exporter.save(figure, "figura_prueba")
-
-            self.assertTrue((output_directory / "figura_prueba.pdf").is_file())
-            self.assertTrue((output_directory / "figura_prueba.png").is_file())
-            self.assertFalse((output_directory / "figura_prueba.json").exists())
-            self.assertGreaterEqual(len(figure.texts), 3)
-            self.assertEqual(figure.texts[0].get_text(), "Título M1–M5")
-            self.assertEqual(figure.texts[1].get_text(), r"IC del 95 % $\pm$")
-            plt.close(figure)
-
-    def test_thesis_export_writes_clean_pdf_and_json_sidecar(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            output_directory = Path(temporary_directory)
-            exporter = FigureExporter(
-                output_directory,
-                profile="thesis",
-                print_json=True,
-            )
-            figure, _axis = plt.subplots(figsize=(2.0, 1.5))
-            exporter.add_header(figure, "Título M1–M5", subtitle="IC del 95 % ±")
-            exporter.add_annotation(
-                figure,
-                "Resultado principal",
-                x=0.1,
-                y=0.9,
-            )
-            exporter.add_note(figure, "Nota metodológica")
-            printed = io.StringIO()
-            with redirect_stdout(printed):
-                payload = exporter.save(figure, "figura_prueba")
-
-            thesis_directory = output_directory / "thesis"
-            sidecar = json.loads(
-                (thesis_directory / "figura_prueba.json").read_text(encoding="utf-8")
-            )
-            self.assertTrue((thesis_directory / "figura_prueba.pdf").is_file())
-            self.assertFalse((thesis_directory / "figura_prueba.png").exists())
-            self.assertEqual(sidecar, payload)
-            self.assertEqual(json.loads(printed.getvalue()), payload)
-            self.assertEqual(sidecar["text_format"], "latex")
-            self.assertEqual(sidecar["pdf_file"], "figura_prueba.pdf")
-            self.assertEqual(sidecar["latex"]["label"], "fig:figura-prueba")
-            self.assertEqual(sidecar["title"], "Título M1--M5")
-            self.assertEqual(
-                sidecar["subtitle"],
-                r"IC del 95 \% \ensuremath{\pm}",
-            )
-            self.assertIn("Resultado principal.", sidecar["caption"])
-            self.assertEqual(figure.texts, [])
-            plt.close(figure)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+WORKBOOK = PROJECT_ROOT / "sources" / "Datos_Ema_Serrana_INN.xlsx"
+NOTEBOOKS = (
+    PROJECT_ROOT / "festuca_estudio_longitudinal.ipynb",
+    PROJECT_ROOT / "festuca_anexo_probabilistico.ipynb",
+)
 
 
-class NitrogenScheduleTests(unittest.TestCase):
-    def test_common_schedule_includes_april_july_and_august_applications(self) -> None:
+class NotebookCell(TypedDict, total=False):
+    cell_type: str
+    execution_count: int | None
+    metadata: dict[str, object]
+    outputs: list[object]
+    source: str | list[str]
+
+
+class NotebookDocument(TypedDict):
+    cells: list[NotebookCell]
+    metadata: dict[str, object]
+
+
+def _read_notebook(path: Path) -> NotebookDocument:
+    raw: object = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise TypeError(f"Notebook root must be an object: {path}")
+    return cast(NotebookDocument, raw)
+
+
+def _cell_source(cell: NotebookCell) -> str:
+    source = cell.get("source", "")
+    return "".join(source) if isinstance(source, list) else source
+
+
+def _festuca_metadata(notebook: NotebookDocument) -> dict[str, object]:
+    metadata = notebook["metadata"].get("festuca")
+    if not isinstance(metadata, dict):
+        raise TypeError("Notebook is missing object metadata.festuca")
+    return cast(dict[str, object], metadata)
+
+
+class WorkbookSourceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.data = load_experiment_data(WORKBOOK)
+
+    def test_provenance_hash_is_computed_from_the_workbook(self) -> None:
+        self.assertEqual(self.data.spec.source_sha256, sha256_file(WORKBOOK))
+
+    def test_structured_schedule_is_read_from_ensayo(self) -> None:
+        workbook = load_workbook(WORKBOOK, data_only=True, read_only=True)
+        try:
+            worksheet = workbook["Ensayo"]
+            workbook_treatments = [
+                str(worksheet.cell(row, 6).value).strip().upper() for row in range(2, 8)
+            ]
+        finally:
+            workbook.close()
         self.assertEqual(
-            COMMON_N_APPLICATIONS,
-            (
-                ("2025-04-01", "2025-05-01", 60.0),
-                ("2025-07-01", "2025-07-01", 52.0),
-                ("2025-08-01", "2025-09-01", 52.0),
-            ),
+            self.data.spec.schedule["treatment"].tolist(),
+            workbook_treatments,
         )
-        self.assertEqual(COMMON_N_TOTAL_KG_HA, 164.0)
-        self.assertEqual(COMMON_N_TOTAL_KG_HA + EXPERIMENTAL_N_TOTAL_KG_HA, 364.0)
+        self.assertEqual(
+            self.data.spec.schedule["source_range"].tolist(),
+            [f"F{row}:H{row}" for row in range(2, 8)],
+        )
+
+    def test_harvest_quantities_are_reconstructed_from_primitives(self) -> None:
+        harvest = self.data.harvest
+        area = self.data.spec.harvest_sample_area_m2
+        np.testing.assert_allclose(
+            harvest["clean_yield_kg_ha"],
+            harvest["clean_mass_g"] * 10.0 / area,
+        )
+        np.testing.assert_allclose(
+            harvest["panicle_density_m2"],
+            harvest["panicle_count"] / area,
+        )
+        np.testing.assert_allclose(
+            harvest["w1000_g"],
+            harvest[["w100_1_g", "w100_2_g", "w100_3_g"]].mean(axis=1) * 10.0,
+        )
+        np.testing.assert_allclose(
+            harvest["estimated_seeds_per_panicle"],
+            1000.0
+            * harvest["clean_mass_g"]
+            / harvest["w1000_g"]
+            / harvest["panicle_count"],
+        )
+
+    def test_quality_estimates_are_identified_and_excluded_from_primary_n(self) -> None:
+        frame = self.data.longitudinal
+        estimated = frame["quality_status"].eq("estimated_in_workbook")
+        measured = frame["quality_status"].eq("recorded")
+        self.assertGreater(int(estimated.sum()), 0)
+        self.assertTrue(frame.loc[estimated, "n_pct"].isna().all())
+        np.testing.assert_allclose(
+            frame.loc[measured, "n_pct"],
+            frame.loc[measured, "n_pct_recorded"],
+        )
+        self.assertTrue(
+            frame.loc[estimated, "n_pct_cell_status"].eq("estimated_in_workbook").all()
+        )
+
+    def test_dry_matter_flags_follow_the_declared_dynamic_rule(self) -> None:
+        frame = self.data.longitudinal
+        expected = (
+            frame["dm_abs_difference_pp"].ge(5.0)
+            & frame["dm_relative_difference"].ge(0.20)
+        ).fillna(False)
+        pd.testing.assert_series_equal(
+            frame["dm_issue"].reset_index(drop=True),
+            expected.reset_index(drop=True),
+            check_names=False,
+        )
+
+    def test_lineage_distinguishes_recorded_calculated_and_estimated_values(
+        self,
+    ) -> None:
+        statuses = " | ".join(self.data.variable_lineage["status"].astype(str))
+        for expected in (
+            "recorded",
+            "calculated_in_workbook",
+            "estimated_in_workbook",
+            "analysis_derived",
+        ):
+            self.assertIn(expected, statuses)
 
 
-class MultiplicityTests(unittest.TestCase):
+class StatisticalUtilityTests(unittest.TestCase):
     def test_benjamini_hochberg_preserves_order_and_monotonicity(self) -> None:
         adjusted = benjamini_hochberg([0.04, 0.001, 0.03, 0.20])
-        np.testing.assert_allclose(adjusted, [0.05333333, 0.004, 0.05333333, 0.20])
+        np.testing.assert_allclose(
+            adjusted,
+            [0.05333333333333334, 0.004, 0.05333333333333334, 0.20],
+        )
 
-
-class MissingCellTests(unittest.TestCase):
-    def test_rcbd_estimate_weights_totals_by_their_denominators(self) -> None:
+    def test_rcbd_missing_cell_estimate_uses_correct_denominators(self) -> None:
         frame = pd.DataFrame(
             {
                 "treatment": ["A"] * 3 + ["B"] * 3 + ["C"] * 3 + ["D"] * 3,
@@ -175,9 +193,7 @@ class MissingCellTests(unittest.TestCase):
         )
         self.assertAlmostEqual(estimate, 12.333333333333334)
 
-
-class MixedOptimizerTests(unittest.TestCase):
-    def test_selects_highest_likelihood_among_converged_fits(self) -> None:
+    def test_mixed_model_selection_uses_best_converged_fit(self) -> None:
         fits = {
             "first": SimpleNamespace(llf=-12.0, converged=False),
             "second": SimpleNamespace(llf=-10.0, converged=True),
@@ -202,7 +218,31 @@ class MixedOptimizerTests(unittest.TestCase):
         self.assertEqual(selected._audit_optimizer, "third")
         self.assertEqual(selected._audit_selection, "best_converged")
 
-    def test_likelihood_ratio_uses_nested_parameter_difference(self) -> None:
+    def test_mixed_model_selection_fails_closed_without_convergence(self) -> None:
+        fits = {
+            "first": SimpleNamespace(llf=-12.0, converged=False),
+            "second": SimpleNamespace(llf=-10.0, converged=False),
+        }
+
+        def fake_fit(**kwargs: Any) -> SimpleNamespace:
+            return fits[str(kwargs["method"])]
+
+        fake_model = SimpleNamespace(fit=fake_fit)
+        frame = pd.DataFrame({"y": [0.0, 1.0], "plot_id": ["a", "b"]})
+        with (
+            patch(
+                "festuca_analysis.statistics.smf.mixedlm",
+                return_value=fake_model,
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            fit_mixedlm_best(
+                "y ~ 1",
+                frame,
+                methods=("first", "second"),
+            )
+
+    def test_likelihood_ratio_uses_parameter_difference(self) -> None:
         reduced = SimpleNamespace(llf=-10.0, df_modelwc=4)
         full = SimpleNamespace(llf=-7.0, df_modelwc=6)
         result = likelihood_ratio(reduced, full)
@@ -211,48 +251,143 @@ class MixedOptimizerTests(unittest.TestCase):
         self.assertGreater(result.p_asymptotic, 0.0)
         self.assertLess(result.p_asymptotic, 0.1)
 
+    def test_partial_correlation_p_value_comes_from_the_full_regression(self) -> None:
+        rng = np.random.default_rng(7)
+        size = 80
+        frame = pd.DataFrame(
+            {
+                "treatment": np.resize(["A", "B", "C", "D"], size),
+                "block": np.resize(["R1", "R2", "R3", "R4"], size),
+                "x": rng.normal(size=size),
+            }
+        )
+        treatment_effect = frame["treatment"].map(
+            {"A": -0.5, "B": 0.0, "C": 0.25, "D": 0.75}
+        )
+        frame["y"] = (
+            0.65 * frame["x"]
+            + treatment_effect
+            + rng.normal(
+                scale=0.7,
+                size=size,
+            )
+        )
+        partial_r, p_value, n = (
+            LongitudinalNotebook._partial_correlation_from_regression(  # pyright: ignore[reportPrivateUsage]
+                frame,
+                x="x",
+                y="y",
+                controls=["treatment", "block"],
+            )
+        )
+        reference = (
+            cast(Any, smf)
+            .ols(
+                "y ~ x + C(treatment) + C(block)",
+                data=frame,
+            )
+            .fit()
+        )
+        t_value = float(reference.tvalues["x"])
+        expected_r = np.sign(t_value) * np.sqrt(
+            t_value**2 / (t_value**2 + reference.df_resid)
+        )
+        self.assertEqual(n, size)
+        self.assertAlmostEqual(partial_r, expected_r)
+        self.assertAlmostEqual(p_value, float(reference.pvalues["x"]))
 
-class SamplerSpecificationTests(unittest.TestCase):
-    @staticmethod
-    def _frame() -> pd.DataFrame:
-        rows: list[dict[str, float | str]] = []
-        for block_index, block in enumerate(["R1", "R2", "R3", "R4"]):
-            for treatment_index, treatment in enumerate(TREATMENTS):
-                rows.append(
-                    {
-                        "block": block,
-                        "treatment": treatment,
-                        "clean_yield_kg_ha": 700.0
-                        + 100.0 * treatment_index
-                        + 10.0 * block_index,
-                    }
+    def test_stable_seed_is_process_independent(self) -> None:
+        self.assertEqual(
+            _stable_seed("Secano", "biomass", "raw", base=123),
+            _stable_seed("Secano", "biomass", "raw", base=123),
+        )
+        self.assertNotEqual(
+            _stable_seed("Secano", "biomass", "raw", base=123),
+            _stable_seed("Riego", "biomass", "raw", base=123),
+        )
+
+
+class NotebookHygieneTests(unittest.TestCase):
+    def test_notebooks_are_unexecuted_and_markdown_is_methods_only(self) -> None:
+        for path in NOTEBOOKS:
+            notebook = _read_notebook(path)
+            festuca_metadata = _festuca_metadata(notebook)
+            self.assertEqual(
+                festuca_metadata["source_of_truth"],
+                "sources/Datos_Ema_Serrana_INN.xlsx",
+            )
+            self.assertEqual(
+                festuca_metadata["markdown_policy"],
+                "mathematics_and_logic_only",
+            )
+            for cell in notebook["cells"]:
+                if cell.get("cell_type") == "code":
+                    self.assertIsNone(cell.get("execution_count"))
+                    self.assertEqual(cell.get("outputs"), [])
+                elif cell.get("cell_type") == "markdown":
+                    tags = cell.get("metadata", {}).get("tags", [])
+                    self.assertIsInstance(tags, list)
+                    self.assertIn("methods-only", cast(list[object], tags))
+
+    def test_notebook_code_cells_are_syntactically_valid(self) -> None:
+        for path in NOTEBOOKS:
+            notebook = _read_notebook(path)
+            for index, cell in enumerate(notebook["cells"]):
+                if cell.get("cell_type") != "code":
+                    continue
+                try:
+                    ast.parse(_cell_source(cell), filename=f"{path.name}:cell-{index}")
+                except SyntaxError as error:
+                    self.fail(f"Invalid code in {path.name}, cell {index}: {error}")
+
+    def test_markdown_contains_methods_not_embedded_results_tables(self) -> None:
+        forbidden_patterns = {
+            "ISO date": re.compile(r"\b20\d{2}-\d{2}-\d{2}\b"),
+            "reported p-value": re.compile(r"\bp\s*=\s*0?\.\d+", re.IGNORECASE),
+            "markdown data table": re.compile(r"\|\s*:?-{3,}:?\s*\|"),
+        }
+        for path in NOTEBOOKS:
+            notebook = _read_notebook(path)
+            markdown = "\n".join(
+                _cell_source(cell)
+                for cell in notebook["cells"]
+                if cell.get("cell_type") == "markdown"
+            )
+            for label, pattern in forbidden_patterns.items():
+                self.assertIsNone(
+                    pattern.search(markdown),
+                    msg=f"{path.name} contains an embedded {label}",
                 )
-        return pd.DataFrame(rows)
 
-    def test_design_maps_treatments_and_has_centered_timing_basis(self) -> None:
-        design = make_design(self._frame())
-        self.assertEqual(design.X.shape, (24, 9))
-        self.assertEqual(design.X_group.shape, (6, 9))
-        np.testing.assert_allclose(
-            design.X_group[1:, design.timing_slice].sum(axis=0), 0, atol=1e-12
-        )
-        np.testing.assert_allclose(design.y_z.mean(), 0.0, atol=1e-12)
+    def test_notebooks_do_not_read_generated_csv_as_input(self) -> None:
+        for path in NOTEBOOKS:
+            notebook = _read_notebook(path)
+            source = "\n".join(
+                _cell_source(cell)
+                for cell in notebook["cells"]
+                if cell.get("cell_type") == "code"
+            )
+            self.assertNotIn("read_csv", source)
+            self.assertNotIn("legacy_probabilistic_run", source)
+            self.assertNotIn("model_b", source.casefold())
 
-    def test_tau_log_density_is_finite(self) -> None:
-        coefficients = np.array([0.2, -0.1, 0.05, -0.15])
-        self.assertTrue(np.isfinite(logp_log_tau(-1.0, coefficients, 0.5)))
+    def test_notebooks_use_the_installed_package_without_path_mutation(self) -> None:
+        for path in NOTEBOOKS:
+            notebook = _read_notebook(path)
+            source = "\n".join(
+                _cell_source(cell)
+                for cell in notebook["cells"]
+                if cell.get("cell_type") == "code"
+            )
+            self.assertNotIn("sys.path", source)
+            self.assertNotIn("source_directory", source)
 
-    def test_priors_are_numeric_and_prior_predictive_is_reproducible(self) -> None:
-        table = prior_specification_table()
-        self.assertIn("sigma^2", set(table["parameter"]))
-        first = prior_predictive_summary(
-            self._frame(), timing_prior_scale=0.5, draws=250, seed=123
+    def test_probabilistic_module_has_no_frozen_legacy_dependency(self) -> None:
+        source = (PROJECT_ROOT / "src" / "festuca_analysis" / "annex.py").read_text(
+            encoding="utf-8"
         )
-        second = prior_predictive_summary(
-            self._frame(), timing_prior_scale=0.5, draws=250, seed=123
-        )
-        pd.testing.assert_frame_equal(first, second)
-        self.assertTrue(np.isfinite(first.select_dtypes("number").to_numpy()).all())
+        self.assertNotIn("legacy_probabilistic_run", source)
+        self.assertNotIn("model_b", source.casefold())
 
 
 if __name__ == "__main__":
