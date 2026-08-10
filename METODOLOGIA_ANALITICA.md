@@ -18,7 +18,7 @@ ejecuta y no resultados copiados de una corrida anterior.
 
 La estrategia general es:
 
-1. leer las mediciones primitivas y el diseño desde el libro XLSX;
+1. validar y leer las mediciones primitivas y el diseño desde los CSV canónicos;
 2. reconstruir de forma determinista las magnitudes derivadas;
 3. auditar discrepancias y valores estimados sin ocultarlos;
 4. responder por separado las preguntas sobre N experimental adicional y sobre
@@ -60,25 +60,26 @@ probabilidad o prueba diseñada para ese margen.
 
 ### 3.1 Fuente de verdad
 
-La única fuente de observaciones es
-`sources/Datos_Ema_Serrana_INN.xlsx`. La carga:
+La única fuente editable y analítica es el conjunto `data/`. La carga:
 
-- calcula el hash SHA-256 del archivo;
-- lee las fórmulas con `data_only=False` para registrar qué celdas son
-  calculadas;
-- lee los valores con `data_only=True` para construir las tablas analíticas;
-- no usa CSV exportados, tablas de la tesis ni posteriores históricos como
-  entradas;
-- clasifica cada variable como registrada, calculada en el libro, estimada en
-  el libro, derivada por el análisis o metadato.
+- valida los tipos, unidades, claves y relaciones declarados en
+  `manifest.json`;
+- calcula un hash SHA-256 determinista de todos los CSV y JSON canónicos;
+- distingue mediciones registradas, materializaciones calculadas, estimaciones
+  identificadas, transformaciones del análisis y metadatos;
+- comprueba cada columna `*_calculated.csv` contra las identidades declaradas
+  en `formulas.json`;
+- no usa el XLSX histórico, tablas de la tesis ni resultados de corridas
+  anteriores como entradas.
 
 Cuando una identidad está completamente determinada por mediciones primitivas,
-la magnitud se vuelve a calcular. La columna derivada del XLSX se conserva solo
-para conciliación.
+la magnitud se vuelve a calcular. La materialización correspondiente se
+conserva solo para conciliación. El XLSX permanece versionado como evidencia
+histórica de la migración y el cargador rechaza explícitamente una ruta `.xlsx`.
 
 ### 3.2 Diseño experimental reconstruido
 
-El libro actual describe:
+El conjunto canónico describe:
 
 - dos sectores físicos: Secano y Riego;
 - seis tratamientos: M0–M5;
@@ -92,17 +93,16 @@ El libro actual describe:
 - área de muestreo de biomasa de $0{,}38\ \mathrm{m^2}$;
 - área de cosecha de $0{,}76\ \mathrm{m^2}$.
 
-El área de cosecha se deriva de la descripción del libro: un metro en dos
-hileras, multiplicado por la separación entre hileras. Esto evita contar dos
-veces la longitud cuando el texto informa simultáneamente metros totales y
-número de surcos.
+El área de cosecha se conserva en los metadatos canónicos como un metro en dos
+hileras, multiplicado por la separación entre hileras. La migración documenta
+esa derivación para evitar contar dos veces la longitud.
 
 ### 3.3 Calendario experimental
 
 M0 permanece en $0\ \mathrm{kg\ N\ ha^{-1}}$ de N experimental. M1–M5 reciben
 dos aplicaciones de $100\ \mathrm{kg\ N\ ha^{-1}}$, para un total de
 $200\ \mathrm{kg\ N\ ha^{-1}}$. Las fechas no están codificadas en el
-notebook: se leen de `Ensayo!F:H`.
+notebook: se reconstruyen desde los eventos atómicos de `field_timeline.csv`.
 
 Para una fecha $t$, el N experimental acumulado del tratamiento $i$ es
 
@@ -120,15 +120,15 @@ donde:
 
 La curva escalonada del notebook representa, por tanto, $0$, $100$ y
 $200\ \mathrm{kg\ N\ ha^{-1}}$. No incorpora una dosis común cuya fracción
-activa de N no está codificada en el XLSX.
+activa de N no está codificada en `field_management.csv`.
 
 En la versión actual de la fuente, el calendario leído es:
 
 | Tratamiento | Primera aplicación | Segunda aplicación | N experimental total |
 |---|---|---|---|
 | M0 | Sin aplicación | Sin aplicación | $0\ \mathrm{kg\ N\ ha^{-1}}$ |
-| M1 | 12 de junio de 2025 | 31 de julio de 2025 | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
-| M2 | 27 de junio de 2025 | 31 de julio de 2025 | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
+| M1 | 12 de junio de 2025 | 4 de agosto de 2025 | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
+| M2 | 27 de junio de 2025 | 4 de agosto de 2025 | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
 | M3 | 9 de julio de 2025 | 21 de agosto de 2025 | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
 | M4 | 4 de agosto de 2025 | 16 de septiembre de 2025 | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
 | M5 | 25 de agosto de 2025 | 16 de septiembre de 2025 | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
@@ -170,9 +170,9 @@ Antes de modelar se comprueba:
 - número esperado de parcelas y filas longitudinales;
 - unicidad de parcela y de combinación parcela-fecha;
 - número de fechas por parcela;
-- coincidencia del peso de mil semillas reconstruido con el libro;
+- coincidencia del peso de mil semillas reconstruido con su materialización;
 - identificación de valores de calidad estimados;
-- conciliación de N acumulado e INN con las columnas del libro;
+- conciliación de N acumulado e INN con los CSV calculados;
 - observaciones de materia seca que activan la regla dinámica de auditoría.
 
 Un control estructural marcado como error detiene la carga; los controles de
@@ -213,7 +213,7 @@ $$
 DM_{\mathrm{razón}}=100\frac{m_d}{m_f}.
 $$
 
-El análisis primario usa el porcentaje registrado en el libro porque el
+El análisis primario usa el porcentaje registrado en el CSV canónico porque el
 procedimiento exacto que originó esa columna no está codificado. La razón
 $m_d/m_f$ se usa para auditoría y sensibilidad.
 
@@ -288,7 +288,7 @@ $a=4{,}8$ y $b=-0{,}32$. El INN es una transformación determinista de $B$,
 $N$ y la curva seleccionada; no se trata como una medición independiente ni
 como una segunda respuesta latente en el anexo probabilístico.
 
-Las filas que el libro marca como estimadas se conservan en columnas de
+Las filas que el conjunto canónico marca como estimadas se conservan en columnas de
 auditoría, pero su $N$ se sustituye por ausente en el análisis primario.
 
 ### 4.4 Rendimiento y componentes
@@ -379,7 +379,7 @@ $$
 
 donde $\bar w$ y $s_w$ son la media y el desvío estándar muestral de las tres
 réplicas. Se informan la mediana, el percentil 95 y el máximo de esos CV, además
-de la diferencia entre $W_{1000}$ reconstruido y el valor del libro. Esto
+de la diferencia entre $W_{1000}$ reconstruido y el valor materializado. Esto
 responde si la medición técnica del peso de semilla es internamente precisa.
 
 ## 5. Análisis clásico por fecha y sector
@@ -553,13 +553,13 @@ influencia; no constituyen pruebas automáticas de validez del modelo.
 
 ### 6.3 Sensibilidad para un valor de N no medido
 
-La política primaria usa casos completos y excluye la fila que el XLSX marca
+La política primaria usa casos completos y excluye la fila que el conjunto canónico marca
 como estimada. Como sensibilidad, una única celda faltante del DBCA se estima
 mediante
 
 $$
 \widehat Y_{ij} =
-\frac{rB_j+tT_i-G}{(r-1)(t-1)},
+\frac{tB_j+rT_i-G}{(t-1)(r-1)},
 $$
 
 donde:
@@ -569,6 +569,10 @@ donde:
 - $G$ es el total general observado;
 - $r$ es el número de bloques;
 - $t$ es el número de tratamientos.
+
+Por tanto, el total del bloque se multiplica por $t$ y el total del tratamiento
+por $r$. Intercambiar esos coeficientes no corresponde a la estimación de una
+celda faltante del DBCA.
 
 El DBCA se vuelve a ajustar y se compara su prueba global con el análisis de
 casos completos. Esta imputación no sustituye la política primaria.
@@ -1096,7 +1100,7 @@ la pregunta y la incertidumbre correspondiente.
 | Figura o familia | Geometría | Pregunta que hace visible |
 |---|---|---|
 | Calendario experimental | Curva escalonada 0–100–200 y fechas de muestreo | ¿Cuánto N experimental llevaba acumulado cada tratamiento en cada fecha? |
-| Agua | Barras de precipitación y riego suplementario | ¿Qué entradas brutas mensuales registra el XLSX? |
+| Agua | Barras de precipitación y riego suplementario | ¿Qué entradas brutas mensuales registran los CSV canónicos? |
 | Trayectorias observadas | Medias e intervalos t, sin líneas | ¿Qué dispersión cruda hay entre bloques en cada celda? |
 | Rendimiento 2 por 2 | Parcelas y medias DBCA con IC puntual | ¿Qué cambia al incluir M0 y al ampliar M1–M5? |
 | Nulo de reconstrucción | Intervalo nulo y correlación observada | ¿La asociación excede la esperable por la identidad algebraica? |
@@ -1134,7 +1138,7 @@ cada etapa con la misma configuración.
 
 1. registrar versiones, semilla, nivel $\alpha$, curvas de INN y política de
    materia seca;
-2. cargar el XLSX, comprobar hash, estructura, linaje y auditorías;
+2. cargar los CSV canónicos, comprobar hash, estructura, linaje y auditorías;
 3. reconstruir biomasa, N acumulado, INN, rendimiento y componentes;
 4. resumir estado inicial, calendario y agua;
 5. ejecutar DBCA por fecha para las dos preguntas;
@@ -1148,7 +1152,7 @@ cada etapa con la misma configuración.
 
 ### 13.3 Flujo del anexo probabilístico
 
-1. cargar el mismo XLSX con la misma política primaria;
+1. cargar el mismo conjunto canónico con la misma política primaria;
 2. declarar verosimilitudes, priors y escalado empírico;
 3. auditar condicionalmente los priors;
 4. ajustar los tres modelos de rendimiento por sector;

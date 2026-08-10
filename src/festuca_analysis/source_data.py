@@ -1,39 +1,67 @@
-"""Workbook-first data loading and provenance for the Festuca experiment.
-
-The XLSX workbook is the only source of observed values used by the analysis.
-This module distinguishes recorded measurements, workbook formulas, estimates,
-and quantities derived by the analysis.  It deliberately does not import result
-values from the thesis document or from previously generated CSV files.
-"""
+"""Canonical CSV loading, reconstruction, validation, and provenance."""
 
 from __future__ import annotations
 
-# Pandas and openpyxl expose partially typed workbook/dataframe boundaries.
-# pyright: reportUnknownArgumentType=false, reportUnknownMemberType=false
+# pandas exposes partially typed dataframe boundaries.
+# pyright: reportArgumentType=false, reportUnknownArgumentType=false
+# pyright: reportUnknownMemberType=false
 # pyright: reportUnknownVariableType=false
+import argparse
 import hashlib
-import re
-import unicodedata
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Final, Literal, cast
+from typing import Final, Literal, cast
 
 import numpy as np
 import pandas as pd
-from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
 
 PROJECT_ROOT: Final = Path(__file__).resolve().parents[2]
-DEFAULT_WORKBOOK: Final = PROJECT_ROOT / "sources" / "Datos_Ema_Serrana_INN.xlsx"
-TREATMENT_PATTERN: Final = re.compile(r"^M[0-5]$")
+DEFAULT_DATA_DIR: Final = PROJECT_ROOT / "data"
+CANONICAL_JSON_FILES: Final = ("manifest.json", "formulas.json")
+REQUIRED_FORMULA_TARGETS: Final = frozenset(
+    {
+        ("dry_matter_calculated.csv", "dry_matter_pct_from_weights"),
+        ("dry_matter_calculated.csv", "dry_matter_abs_difference_pp"),
+        ("dry_matter_calculated.csv", "dry_matter_relative_difference"),
+        ("dry_matter_calculated.csv", "dry_matter_issue"),
+        ("dry_matter_calculated.csv", "biomass_recorded_dm_kg_ha"),
+        ("dry_matter_calculated.csv", "biomass_ratio_dm_kg_ha"),
+        (
+            "dry_matter_calculated.csv",
+            "biomass_recalculation_difference_kg_ha",
+        ),
+        ("dry_matter_calculated.csv", "tiller_density_m2"),
+        ("harvest_calculated.csv", "w1000_g"),
+        ("harvest_calculated.csv", "panicle_density_m2"),
+        ("harvest_calculated.csv", "dirty_yield_kg_ha"),
+        ("harvest_calculated.csv", "clean_yield_kg_ha"),
+        ("harvest_calculated.csv", "clean_recovery"),
+        ("harvest_calculated.csv", "cleaning_loss_pct"),
+        ("harvest_calculated.csv", "estimated_seed_count"),
+        ("harvest_calculated.csv", "estimated_seeds_per_panicle"),
+        ("harvest_calculated.csv", "harvest_index_pct"),
+        ("quality_calculated.csv", "estimated_n_pct"),
+        ("quality_calculated.csv", "estimated_adf_pct"),
+        ("quality_calculated.csv", "estimated_ndf_pct"),
+        ("quality_calculated.csv", "n_accumulated_kg_ha"),
+        ("quality_calculated.csv", "critical_n_pct"),
+        ("quality_calculated.csv", "nni"),
+        ("missing_quality_estimate.csv", "n_pct_estimated"),
+        ("missing_quality_estimate.csv", "adf_pct_estimated"),
+        ("missing_quality_estimate.csv", "ndf_pct_estimated"),
+        ("missing_quality_estimate.csv", "n_accumulated_kg_ha"),
+        ("missing_quality_estimate.csv", "critical_n_pct"),
+        ("missing_quality_estimate.csv", "nni"),
+    }
+)
 
 DataStatus = Literal[
     "recorded",
     "recorded_method_not_encoded",
-    "calculated_in_workbook",
-    "reported_derived_without_formula",
-    "estimated_in_workbook",
+    "calculated_materialization",
+    "estimated",
     "missing",
     "analysis_derived",
     "metadata",
@@ -43,9 +71,9 @@ DryMatterPolicy = Literal["recorded", "ratio", "exclude"]
 
 @dataclass(frozen=True)
 class ExperimentSpec:
-    """Design and management information parsed from the workbook."""
+    """Design and management information loaded from the canonical data bundle."""
 
-    workbook_path: Path
+    data_dir: Path
     source_sha256: str
     experiment_year: int
     treatments: tuple[str, ...]
@@ -68,7 +96,7 @@ class ExperimentSpec:
 
 @dataclass(frozen=True)
 class ExperimentData:
-    """Analysis-ready tables plus their source and lineage metadata."""
+    """Analysis-ready tables plus source and lineage metadata."""
 
     spec: ExperimentSpec
     longitudinal: pd.DataFrame
@@ -88,264 +116,654 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def locate_workbook(
-    workbook_path: Path | str | None = None,
+def locate_data_dir(
+    data_dir: Path | str | None = None,
     *,
     project_root: Path | None = None,
 ) -> Path:
-    """Resolve the workbook without consulting generated CSV exports."""
+    """Resolve the canonical directory and reject workbook paths explicitly."""
 
-    if workbook_path is not None:
-        explicit = Path(workbook_path).expanduser().resolve()
-        if not explicit.is_file():
-            raise FileNotFoundError(f"No existe el libro indicado: {explicit}")
+    if data_dir is not None:
+        explicit = Path(data_dir).expanduser().resolve()
+        if explicit.is_file():
+            if explicit.suffix.casefold() == ".xlsx":
+                raise ValueError(
+                    "El XLSX es evidencia histórica de migración y no puede usarse "
+                    "como fuente analítica; indique el directorio data/."
+                )
+            raise NotADirectoryError(
+                f"La fuente canónica debe ser un directorio: {explicit}"
+            )
+        if not explicit.is_dir():
+            raise FileNotFoundError(f"No existe el directorio de datos: {explicit}")
         return explicit
 
     root = (project_root or PROJECT_ROOT).resolve()
-    candidates = [
-        root / "sources" / DEFAULT_WORKBOOK.name,
-        root / DEFAULT_WORKBOOK.name,
-        Path("/mnt/data") / DEFAULT_WORKBOOK.name,
-    ]
+    candidates = [root / "data", Path("/mnt/data") / "data"]
     for candidate in candidates:
-        if candidate.is_file():
+        if candidate.is_dir():
             return candidate.resolve()
     attempted = ", ".join(str(candidate) for candidate in candidates)
     raise FileNotFoundError(
-        f"No se encontró {DEFAULT_WORKBOOK.name!r}. Se probó: {attempted}"
+        f"No se encontró el directorio canónico data/. Se probó: {attempted}"
     )
 
 
-def _strip_accents(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value)
-    return "".join(
-        character for character in normalized if not unicodedata.combining(character)
+def sha256_data_bundle(data_dir: Path) -> str:
+    """Hash all analytical CSV and JSON inputs in deterministic path order."""
+
+    digest = hashlib.sha256()
+    files = sorted(
+        path
+        for path in data_dir.iterdir()
+        if path.is_file() and path.suffix.casefold() in {".csv", ".json"}
     )
+    for path in files:
+        relative = path.relative_to(data_dir).as_posix().encode("utf-8")
+        digest.update(relative)
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
-def _normalize_text(value: object) -> str:
-    if value is None or (isinstance(value, float) and np.isnan(value)):
-        return ""
-    return " ".join(str(value).strip().split())
+def _read_json(path: Path) -> dict[str, object]:
+    raw: object = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise TypeError(f"Expected a JSON object: {path}")
+    return cast(dict[str, object], raw)
 
 
-def _normalize_treatment(value: object) -> str:
-    text = _normalize_text(value).upper().replace("MO", "M0")
-    return text
-
-
-def _normalize_sector(value: object) -> str:
-    text = _strip_accents(_normalize_text(value)).casefold()
-    mapping = {"secano": "Secano", "riego": "Riego"}
-    return mapping.get(text, _normalize_text(value))
-
-
-def _normalize_block(value: object) -> str:
-    return _normalize_text(value).upper()
-
-
-def _coerce_numeric(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
-    result = frame.copy()
-    for column in columns:
-        if column in result.columns:
-            result[column] = pd.to_numeric(result[column], errors="coerce")
+def _manifest_datasets(manifest: Mapping[str, object]) -> dict[str, dict[str, object]]:
+    raw = manifest.get("datasets")
+    if not isinstance(raw, dict):
+        raise TypeError("manifest.json must contain an object named datasets")
+    result: dict[str, dict[str, object]] = {}
+    for filename, spec in raw.items():
+        if not isinstance(filename, str) or not isinstance(spec, dict):
+            raise TypeError("Each manifest dataset must map a filename to an object")
+        result[filename] = cast(dict[str, object], spec)
     return result
 
 
-def _parse_partial_date(value: object, *, year: int) -> pd.Timestamp | None:
-    if value is None:
-        return None
-    if isinstance(value, (pd.Timestamp, datetime, date)):
-        return pd.Timestamp(value)
-    if isinstance(value, (int, float)) and not pd.isna(value):
-        # Excel serial dates use 1899-12-30 as the origin in pandas/openpyxl.
-        return pd.Timestamp("1899-12-30") + pd.to_timedelta(float(value), unit="D")
-
-    text = _strip_accents(_normalize_text(value)).casefold()
-    if not text or text in {"_", "-", "sin fecha"}:
-        return None
-
-    month_lookup = {
-        "ene": 1,
-        "enero": 1,
-        "feb": 2,
-        "febrero": 2,
-        "mar": 3,
-        "marzo": 3,
-        "abr": 4,
-        "abril": 4,
-        "may": 5,
-        "mayo": 5,
-        "jun": 6,
-        "junio": 6,
-        "jul": 7,
-        "julio": 7,
-        "ago": 8,
-        "agosto": 8,
-        "sep": 9,
-        "set": 9,
-        "septiembre": 9,
-        "setiembre": 9,
-        "oct": 10,
-        "octubre": 10,
-        "nov": 11,
-        "noviembre": 11,
-        "dic": 12,
-        "diciembre": 12,
+def _parse_boolean(series: pd.Series) -> pd.Series:
+    mapping: dict[object, object] = {
+        "true": True,
+        "false": False,
+        "": pd.NA,
+        None: pd.NA,
     }
-    match = re.fullmatch(r"(\d{1,2})\s*[-/]?\s*([a-z]+)", text)
-    if match:
-        day = int(match.group(1))
-        month = month_lookup.get(match.group(2))
-        if month is None:
-            raise ValueError(f"Mes no reconocido en fecha parcial: {value!r}")
-        return pd.Timestamp(year=year, month=month, day=day)
-
-    parsed = pd.to_datetime(str(value), errors="coerce", dayfirst=True)
-    if pd.isna(parsed):
-        raise ValueError(f"No se pudo interpretar la fecha del libro: {value!r}")
-    parsed = pd.Timestamp(parsed)
-    if parsed.year == 1900:
-        parsed = parsed.replace(year=year)
-    return parsed
+    normalized = series.fillna("").astype(str).str.casefold().map(mapping)
+    invalid = normalized.isna() & series.notna() & series.astype(str).ne("")
+    if invalid.any():
+        values = sorted(set(series.loc[invalid].astype(str)))
+        raise ValueError(f"Invalid boolean values: {values}")
+    return normalized.astype("boolean")
 
 
-def _month_number(value: object) -> int:
-    text = _strip_accents(_normalize_text(value)).casefold()
-    names = {
-        "enero": 1,
-        "febrero": 2,
-        "marzo": 3,
-        "abril": 4,
-        "mayo": 5,
-        "junio": 6,
-        "julio": 7,
-        "agosto": 8,
-        "setiembre": 9,
-        "septiembre": 9,
-        "octubre": 10,
-        "noviembre": 11,
-        "diciembre": 12,
-    }
-    if text not in names:
-        raise ValueError(f"Mes no reconocido: {value!r}")
-    return names[text]
+def _read_typed_csv(
+    data_dir: Path, filename: str, spec: Mapping[str, object]
+) -> pd.DataFrame:
+    path = data_dir / filename
+    if not path.is_file():
+        raise FileNotFoundError(f"Falta el archivo canónico: {path}")
+    frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+    raw_columns = spec.get("columns")
+    if not isinstance(raw_columns, dict):
+        raise TypeError(f"Manifest columns must be an object for {filename}")
+    columns = cast(dict[str, dict[str, object]], raw_columns)
+    expected = list(columns)
+    if frame.columns.tolist() != expected:
+        raise ValueError(
+            f"Columnas inesperadas en {filename}: {frame.columns.tolist()}; "
+            f"se esperaba {expected}."
+        )
+    for column, column_spec in columns.items():
+        data_type = column_spec.get("type")
+        nullable = bool(column_spec.get("nullable", False))
+        empty = frame[column].eq("")
+        if not nullable and empty.any():
+            rows = (frame.index[empty] + 2).tolist()[:5]
+            raise ValueError(
+                f"Valores vacíos no permitidos en {filename}:{column}, filas {rows}"
+            )
+        if data_type == "integer":
+            numeric = pd.to_numeric(frame[column].replace("", pd.NA), errors="raise")
+            non_integer = numeric.dropna().mod(1).ne(0)
+            if non_integer.any():
+                raise ValueError(f"Expected integer values in {filename}:{column}")
+            frame[column] = numeric.astype("Int64")
+        elif data_type == "number":
+            frame[column] = pd.to_numeric(
+                frame[column].replace("", pd.NA), errors="raise"
+            ).astype(float)
+        elif data_type == "date":
+            parsed = pd.to_datetime(frame[column].replace("", pd.NA), errors="raise")
+            frame[column] = parsed
+        elif data_type == "boolean":
+            frame[column] = _parse_boolean(frame[column])
+        elif data_type == "string":
+            frame[column] = frame[column].replace("", pd.NA).astype("string")
+        else:
+            raise ValueError(f"Unsupported manifest type {data_type!r} in {filename}")
+
+    raw_primary_key = spec.get("primary_key")
+    if not isinstance(raw_primary_key, list) or not all(
+        isinstance(value, str) for value in raw_primary_key
+    ):
+        raise TypeError(f"Invalid primary key in manifest for {filename}")
+    primary_key = cast(list[str], raw_primary_key)
+    if frame[primary_key].isna().any(axis=None):
+        raise ValueError(f"Null primary key in {filename}: {primary_key}")
+    if frame.duplicated(primary_key).any():
+        raise ValueError(f"Duplicate primary key in {filename}: {primary_key}")
+    return frame
 
 
-def _formula_coordinates(workbook_path: Path) -> dict[str, set[str]]:
-    book = load_workbook(workbook_path, data_only=False, read_only=False)
-    try:
-        result: dict[str, set[str]] = {}
-        for sheet_name in book.sheetnames:
-            coordinates: set[str] = set()
-            for row in book[sheet_name].iter_rows():
-                for cell in row:
-                    if cell.data_type == "f":
-                        coordinates.add(cell.coordinate)
-            result[sheet_name] = coordinates
-        return result
-    finally:
-        book.close()
-
-
-def _cell_status(
+def _assert_close(
+    observed: pd.Series,
+    expected: pd.Series,
     *,
-    formula_coordinates: dict[str, set[str]],
-    sheet: str,
-    column_number: int,
-    excel_row: int,
-    semantically_derived: bool,
-) -> DataStatus:
-    coordinate = f"{get_column_letter(column_number)}{excel_row}"
-    if coordinate in formula_coordinates.get(sheet, set()):
-        return "calculated_in_workbook"
-    if semantically_derived:
-        return "reported_derived_without_formula"
-    return "recorded"
+    label: str,
+    atol: float = 1e-9,
+) -> None:
+    np.testing.assert_allclose(
+        pd.to_numeric(observed, errors="coerce").to_numpy(float),
+        pd.to_numeric(expected, errors="coerce").to_numpy(float),
+        rtol=1e-12,
+        atol=atol,
+        equal_nan=True,
+        err_msg=label,
+    )
 
 
-def _parse_schedule(value_sheet: object, *, experiment_year: int) -> pd.DataFrame:
-    sheet = value_sheet["Ensayo"]  # type: ignore[index]
+def _metadata_values(frame: pd.DataFrame) -> dict[str, object]:
+    values: dict[str, object] = {}
+    for record in frame.itertuples(index=False):
+        parameter = str(record.parameter)
+        if record.value_type == "integer":
+            values[parameter] = int(record.value)
+        elif record.value_type == "number":
+            values[parameter] = float(record.value)
+        else:
+            values[parameter] = str(record.value)
+    return values
+
+
+def _validate_formula_metadata(
+    formulas: Mapping[str, object], frames: Mapping[str, pd.DataFrame]
+) -> None:
+    raw_formulas = formulas.get("formulas")
+    if not isinstance(raw_formulas, list) or not raw_formulas:
+        raise TypeError("formulas.json must contain a non-empty formulas array")
+    identifiers: set[str] = set()
+    targets: set[tuple[str, str]] = set()
+    for raw in raw_formulas:
+        if not isinstance(raw, dict):
+            raise TypeError("Each formula definition must be an object")
+        formula = cast(dict[str, object], raw)
+        identifier = formula.get("id")
+        output_file = formula.get("output_file")
+        output_column = formula.get("output_column")
+        if not all(
+            isinstance(value, str) for value in (identifier, output_file, output_column)
+        ):
+            raise TypeError("Formula id, output_file and output_column must be strings")
+        identifier_text = cast(str, identifier)
+        if identifier_text in identifiers:
+            raise ValueError(f"Duplicate formula id: {identifier_text}")
+        identifiers.add(identifier_text)
+        output_file_text = cast(str, output_file)
+        output_column_text = cast(str, output_column)
+        if output_file_text not in frames:
+            raise ValueError(f"Formula targets unknown dataset: {output_file_text}")
+        if output_column_text not in frames[output_file_text].columns:
+            raise ValueError(
+                f"Formula {identifier_text} targets unknown column "
+                f"{output_file_text}:{output_column_text}"
+            )
+        target = (output_file_text, output_column_text)
+        if target in targets:
+            raise ValueError(f"Duplicate formula target: {target}")
+        targets.add(target)
+        inputs = formula.get("inputs")
+        if (
+            not isinstance(inputs, list)
+            or not inputs
+            or not all(isinstance(value, str) and value for value in inputs)
+        ):
+            raise TypeError(f"Formula {identifier_text} has invalid inputs")
+        for field in ("expression", "excel_formula_template"):
+            value = formula.get(field)
+            if not isinstance(value, str) or not value:
+                raise TypeError(f"Formula {identifier_text} has invalid {field}")
+        if "unit" not in formula:
+            raise TypeError(f"Formula {identifier_text} is missing unit")
+    required_targets = set(REQUIRED_FORMULA_TARGETS)
+    if targets != required_targets:
+        missing = sorted(required_targets - targets)
+        unexpected = sorted(targets - required_targets)
+        raise ValueError(
+            "Formula targets do not cover the canonical materializations; "
+            f"missing={missing}, unexpected={unexpected}"
+        )
+
+
+def _validate_relations(
+    dataset_specs: Mapping[str, Mapping[str, object]],
+    frames: Mapping[str, pd.DataFrame],
+) -> None:
+    for filename, spec in dataset_specs.items():
+        raw_foreign_keys = spec.get("foreign_keys", [])
+        if not isinstance(raw_foreign_keys, list):
+            raise TypeError(f"foreign_keys must be a list for {filename}")
+        for raw in raw_foreign_keys:
+            if not isinstance(raw, dict):
+                raise TypeError(f"Invalid foreign key definition for {filename}")
+            foreign_key = cast(dict[str, object], raw)
+            columns = cast(list[str], foreign_key["columns"])
+            reference_file = cast(str, foreign_key["references"])
+            reference_columns = cast(
+                list[str], foreign_key.get("reference_columns", columns)
+            )
+            left = frames[filename][columns].dropna().drop_duplicates()
+            right = frames[reference_file][reference_columns].dropna().drop_duplicates()
+            right.columns = columns
+            unmatched = left.merge(right, on=columns, how="left", indicator=True)
+            if unmatched["_merge"].ne("both").any():
+                raise ValueError(
+                    f"Foreign key violation: {filename}{columns} -> "
+                    f"{reference_file}{reference_columns}"
+                )
+
+
+def _rcbd_estimate(
+    frame: pd.DataFrame,
+    value_column: str,
+    *,
+    treatment: str,
+    block: str,
+    treatment_count: int,
+    block_count: int,
+) -> tuple[float, float, float, float]:
+    observed = frame.dropna(subset=[value_column])
+    block_total = float(observed.loc[observed["block"].eq(block), value_column].sum())
+    treatment_total = float(
+        observed.loc[observed["treatment"].eq(treatment), value_column].sum()
+    )
+    grand_total = float(observed[value_column].sum())
+    estimate = (
+        treatment_count * block_total + block_count * treatment_total - grand_total
+    ) / ((treatment_count - 1) * (block_count - 1))
+    return block_total, treatment_total, grand_total, estimate
+
+
+def _validate_scientific_identities(
+    frames: Mapping[str, pd.DataFrame], metadata: Mapping[str, object]
+) -> None:
+    design = frames["experimental_design.csv"]
+    if len(design) != 24:
+        raise ValueError(
+            f"Expected 24 experimental design positions, found {len(design)}"
+        )
+    expected_treatments = {f"M{index}" for index in range(6)}
+    for block, block_frame in design.groupby("block", observed=True):
+        observed = set(block_frame["treatment"].astype(str))
+        if observed != expected_treatments:
+            raise ValueError(
+                f"Block {block} does not contain M0-M5 exactly once: {observed}"
+            )
+
+    experiment_year = int(metadata["experiment_year"])
+    for filename, frame in frames.items():
+        for column in frame.columns:
+            if column != "date":
+                continue
+            years = set(frame[column].dropna().dt.year.astype(int))
+            if years and years != {experiment_year}:
+                raise ValueError(
+                    f"Experimental dates in {filename}:{column} do not match "
+                    f"experiment year {experiment_year}: {years}"
+                )
+
+    timeline = frames["field_timeline.csv"]
+    years = set(pd.to_datetime(timeline["date"]).dt.year)
+    if years != {experiment_year}:
+        raise ValueError(f"Timeline years do not match experiment year: {years}")
+    applications = timeline.loc[timeline["event_type"].eq("nitrogen_application")]
+    if len(applications) != 10:
+        raise ValueError(
+            f"Expected 10 treatment applications, found {len(applications)}"
+        )
+    counts = applications.groupby("treatment", observed=True)[
+        "application_number"
+    ].nunique()
+    if counts.to_dict() != {f"M{index}": 2 for index in range(1, 6)}:
+        raise ValueError(
+            f"Each M1-M5 treatment must have two applications: {counts.to_dict()}"
+        )
+    m3_second = applications.loc[
+        applications["treatment"].eq("M3") & applications["application_number"].eq(2),
+        "date",
+    ]
+    if len(m3_second) != 1 or pd.Timestamp(m3_second.iloc[0]) != pd.Timestamp(
+        "2025-08-21"
+    ):
+        raise ValueError("M3 application 2 must be 2025-08-21")
+    if timeline["date"].isin([pd.Timestamp("2025-07-31")]).any():
+        raise ValueError("The obsolete 2025-07-31 date is not permitted")
+
+    water = frames["water_inputs.csv"]
+    expected_months = list(range(1, 12))
+    if water["month"].astype(int).tolist() != expected_months:
+        raise ValueError("Water inputs must contain January-November exactly once")
+    if not np.isclose(float(water["irrigation_mm"].sum()), 165.0):
+        raise ValueError("Monthly irrigation must sum to 165 mm")
+    if not np.isclose(float(water["rainfall_mm"].sum()), 1176.0):
+        raise ValueError("Monthly rainfall must sum to 1176 mm")
+
+    dry_raw = frames["dry_matter_recorded.csv"]
+    dry_calc = frames["dry_matter_calculated.csv"]
+    if len(dry_raw) != 154 or len(dry_calc) != 154:
+        raise ValueError("Dry-matter datasets must each contain 154 rows")
+    dry = dry_raw.merge(dry_calc, on="observation_id", validate="one_to_one")
+    ratio = 100.0 * dry["dry_weight_g"] / dry["green_weight_sample_g"]
+    _assert_close(dry["dry_matter_pct_from_weights"], ratio, label="dry matter ratio")
+    absolute = (dry["dry_matter_pct"] - ratio).abs()
+    relative = absolute / dry["dry_matter_pct"].abs().replace(0.0, np.nan)
+    _assert_close(
+        dry["dry_matter_abs_difference_pp"],
+        absolute,
+        label="dry matter absolute difference",
+    )
+    _assert_close(
+        dry["dry_matter_relative_difference"],
+        relative,
+        label="dry matter relative difference",
+    )
+    issue = (absolute.ge(5.0) & relative.ge(0.20)).fillna(False)
+    pd.testing.assert_series_equal(
+        dry["dry_matter_issue"].fillna(False).astype(bool).reset_index(drop=True),
+        issue.astype(bool).reset_index(drop=True),
+        check_names=False,
+        obj="dry matter issue",
+    )
+    area = float(metadata["biomass_sample_area_m2"])
+    biomass = dry["green_weight_1m_g"] * (dry["dry_matter_pct"] / 100.0) * 10.0 / area
+    biomass_ratio = dry["green_weight_1m_g"] * (ratio / 100.0) * 10.0 / area
+    _assert_close(
+        dry["biomass_recorded_dm_kg_ha"],
+        biomass,
+        label="biomass using recorded dry matter",
+    )
+    _assert_close(
+        dry["biomass_ratio_dm_kg_ha"],
+        biomass_ratio,
+        label="biomass using reconstructed dry matter",
+    )
+    _assert_close(
+        dry["biomass_recalculation_difference_kg_ha"],
+        biomass - dry["biomass_reported_kg_ha"],
+        label="biomass reconciliation",
+    )
+    tillers = (
+        dry["tillers_30_cm"]
+        * (100.0 / 30.0)
+        * (100.0 / float(metadata["row_spacing_cm"]))
+    )
+    _assert_close(dry["tiller_density_m2"], tillers, label="tiller density")
+
+    harvest_raw = frames["harvest_recorded.csv"]
+    harvest_calc = frames["harvest_calculated.csv"]
+    if len(harvest_raw) != 48 or len(harvest_calc) != 48:
+        raise ValueError("Harvest datasets must each contain 48 rows")
+    harvest = harvest_raw.merge(
+        harvest_calc, on="observation_id", validate="one_to_one"
+    )
+    harvest_area = float(metadata["harvest_sample_area_m2"])
+    w1000 = harvest[["w100_rep1_g", "w100_rep2_g", "w100_rep3_g"]].mean(axis=1) * 10.0
+    _assert_close(harvest["w1000_g"], w1000, label="thousand seed weight")
+    _assert_close(
+        harvest["panicle_density_m2"],
+        harvest["panicle_count"] / harvest_area,
+        label="panicle density",
+    )
+    _assert_close(
+        harvest["dirty_yield_kg_ha"],
+        harvest["dirty_seed_mass_g"] * 10.0 / harvest_area,
+        label="dirty yield",
+    )
+    _assert_close(
+        harvest["clean_yield_kg_ha"],
+        harvest["clean_seed_mass_g"] * 10.0 / harvest_area,
+        label="clean yield",
+    )
+    recovery = harvest["clean_seed_mass_g"] / harvest["dirty_seed_mass_g"]
+    _assert_close(harvest["clean_recovery"], recovery, label="clean recovery")
+    _assert_close(
+        harvest["cleaning_loss_pct"], 100.0 * (1.0 - recovery), label="cleaning loss"
+    )
+    seed_count = 1000.0 * harvest["clean_seed_mass_g"] / w1000
+    _assert_close(
+        harvest["estimated_seed_count"], seed_count, label="estimated seed count"
+    )
+    _assert_close(
+        harvest["estimated_seeds_per_panicle"],
+        seed_count / harvest["panicle_count"],
+        label="estimated seeds per panicle",
+    )
+    final_biomass = dry.loc[
+        dry["date"].eq(dry["date"].max())
+        & dry["treatment"].astype(str).str.fullmatch(r"M[0-5]", na=False),
+        ["sector", "treatment", "block", "biomass_recorded_dm_kg_ha"],
+    ]
+    harvest_with_biomass = harvest.merge(
+        final_biomass,
+        on=["sector", "treatment", "block"],
+        how="left",
+        validate="one_to_one",
+    )
+    _assert_close(
+        harvest_with_biomass["harvest_index_pct"],
+        100.0
+        * harvest_with_biomass["clean_yield_kg_ha"]
+        / harvest_with_biomass["biomass_recorded_dm_kg_ha"],
+        label="harvest index",
+    )
+
+    quality_raw = frames["quality_recorded.csv"]
+    quality_calc = frames["quality_calculated.csv"]
+    estimate = frames["missing_quality_estimate.csv"]
+    if len(quality_raw) != 152 or len(quality_calc) != 152 or len(estimate) != 1:
+        raise ValueError("Quality datasets must contain 152, 152, and 1 rows")
+    estimated_rows = quality_raw.loc[quality_raw["measurement_status"].eq("estimated")]
+    if len(estimated_rows) != 1:
+        raise ValueError("Exactly one quality row must be marked estimated")
+    missing = estimated_rows.iloc[0]
+    subset = quality_raw.loc[
+        quality_raw["date"].eq(missing["date"])
+        & quality_raw["sector"].eq(missing["sector"])
+    ]
+    estimate_row = estimate.iloc[0]
+    for variable, prefix in (("n_pct", "n"), ("adf_pct", "adf"), ("ndf_pct", "ndf")):
+        block_total, treatment_total, grand_total, value = _rcbd_estimate(
+            subset,
+            variable,
+            treatment=str(missing["treatment"]),
+            block=str(missing["block"]),
+            treatment_count=6,
+            block_count=4,
+        )
+        expected = pd.Series([block_total, treatment_total, grand_total, value])
+        observed = estimate_row[
+            [
+                f"{prefix}_block_total",
+                f"{prefix}_treatment_total",
+                f"{prefix}_grand_total",
+                f"{prefix}_pct_estimated",
+            ]
+        ]
+        _assert_close(observed, expected, label=f"{prefix} DBCA estimate")
+    if not np.isclose(float(estimate_row["n_pct_estimated"]), 2.8688484862162937):
+        raise ValueError("The canonical missing N estimate is incorrect")
+    if not np.isclose(float(estimate_row["adf_pct_estimated"]), 40.77623836505554):
+        raise ValueError("The canonical missing ADF estimate is incorrect")
+    if not np.isclose(float(estimate_row["ndf_pct_estimated"]), 69.57708690222144):
+        raise ValueError("The canonical missing NDF estimate is incorrect")
+    if not np.isclose(float(estimate_row["n_accumulated_kg_ha"]), 201.8808679750406):
+        raise ValueError("The canonical missing accumulated N is incorrect")
+    if not np.isclose(float(estimate_row["nni"]), 1.1159131393270323):
+        raise ValueError("The canonical missing NNI is incorrect")
+
+    estimate_biomass = float(estimate_row["biomass_kg_ha"])
+    estimate_n = float(estimate_row["n_pct_estimated"])
+    estimate_critical = 4.8 * (estimate_biomass / 1000.0) ** -0.32
+    _assert_close(
+        estimate["n_accumulated_kg_ha"],
+        pd.Series([estimate_biomass * estimate_n / 100.0]),
+        label="missing accumulated N",
+    )
+    _assert_close(
+        estimate["critical_n_pct"],
+        pd.Series([estimate_critical]),
+        label="missing critical N",
+    )
+    _assert_close(
+        estimate["nni"],
+        pd.Series([estimate_n / estimate_critical]),
+        label="missing NNI",
+    )
+
+    quality = quality_raw.merge(
+        quality_calc,
+        on="sample_id",
+        validate="one_to_one",
+        suffixes=("_recorded", "_calculated"),
+    ).merge(
+        dry[["sample_id", "biomass_reported_kg_ha"]].dropna(subset=["sample_id"]),
+        on="sample_id",
+        validate="one_to_one",
+    )
+    estimated_mask = quality["measurement_status"].eq("estimated")
+    expected_n_estimate = pd.Series(np.nan, index=quality.index)
+    expected_adf_estimate = pd.Series(np.nan, index=quality.index)
+    expected_ndf_estimate = pd.Series(np.nan, index=quality.index)
+    expected_n_estimate.loc[estimated_mask] = float(estimate_row["n_pct_estimated"])
+    expected_adf_estimate.loc[estimated_mask] = float(estimate_row["adf_pct_estimated"])
+    expected_ndf_estimate.loc[estimated_mask] = float(estimate_row["ndf_pct_estimated"])
+    _assert_close(
+        quality["estimated_n_pct"],
+        expected_n_estimate,
+        label="identified N estimate",
+    )
+    _assert_close(
+        quality["estimated_adf_pct"],
+        expected_adf_estimate,
+        label="identified ADF estimate",
+    )
+    _assert_close(
+        quality["estimated_ndf_pct"],
+        expected_ndf_estimate,
+        label="identified NDF estimate",
+    )
+    effective_n = quality["n_pct"].fillna(quality["estimated_n_pct"])
+    materialized_biomass = quality["biomass_reported_kg_ha"]
+    critical_n = 4.8 * (materialized_biomass / 1000.0) ** -0.32
+    _assert_close(
+        quality["n_accumulated_kg_ha"],
+        materialized_biomass * effective_n / 100.0,
+        label="quality accumulated N",
+    )
+    _assert_close(
+        quality["critical_n_pct"],
+        critical_n,
+        label="quality critical N",
+    )
+    _assert_close(quality["nni"], effective_n / critical_n, label="quality NNI")
+
+
+def validate_data_bundle(
+    data_dir: Path | str | None = None,
+    *,
+    project_root: Path | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Validate schemas, relationships, chronology, and calculated identities."""
+
+    path = locate_data_dir(data_dir, project_root=project_root)
+    manifest = _read_json(path / "manifest.json")
+    formulas = _read_json(path / "formulas.json")
+    if manifest.get("schema_version") != 1 or formulas.get("schema_version") != 1:
+        raise ValueError("Unsupported canonical data schema version")
+    if manifest.get("authority") != "canonical_csv_bundle":
+        raise ValueError("manifest.json does not declare the CSV bundle as canonical")
+    dataset_specs = _manifest_datasets(manifest)
+    frames = {
+        filename: _read_typed_csv(path, filename, spec)
+        for filename, spec in dataset_specs.items()
+    }
+    _validate_relations(dataset_specs, frames)
+    _validate_formula_metadata(formulas, frames)
+    metadata = _metadata_values(frames["experiment_metadata.csv"])
+    _validate_scientific_identities(frames, metadata)
+    return frames
+
+
+def _schedule_from_timeline(
+    timeline: pd.DataFrame, treatments: tuple[str, ...], experiment_year: int
+) -> pd.DataFrame:
+    applications = timeline.loc[
+        timeline["event_type"].eq("nitrogen_application"),
+        ["treatment", "application_number", "date"],
+    ].copy()
+    if (
+        not applications.empty
+        and not applications["date"].dt.year.eq(experiment_year).all()
+    ):
+        wrong = applications.loc[
+            ~applications["date"].dt.year.eq(experiment_year)
+        ].iloc[0]
+        raise ValueError(
+            f"Application {wrong['treatment']} belongs to {wrong['date'].year}; "
+            f"expected experiment year {experiment_year}."
+        )
     rows: list[dict[str, object]] = []
-    for row in range(2, 8):
-        treatment = _normalize_treatment(sheet.cell(row, 6).value)
-        if not TREATMENT_PATTERN.fullmatch(treatment):
-            continue
-        first = _parse_partial_date(sheet.cell(row, 7).value, year=experiment_year)
-        second = _parse_partial_date(sheet.cell(row, 8).value, year=experiment_year)
+    for treatment in treatments:
+        subset = applications.loc[applications["treatment"].eq(treatment)].set_index(
+            "application_number"
+        )
         rows.append(
             {
                 "treatment": treatment,
-                "first_application": first,
-                "second_application": second,
-                "source_sheet": "Ensayo",
-                "source_range": f"F{row}:H{row}",
+                "first_application": (
+                    subset.loc[1, "date"] if 1 in subset.index else pd.NaT
+                ),
+                "second_application": (
+                    subset.loc[2, "date"] if 2 in subset.index else pd.NaT
+                ),
+                "source_dataset": "field_timeline.csv",
+                "source_range": "field_timeline.csv",
             }
         )
-    schedule = pd.DataFrame(rows).sort_values("treatment").reset_index(drop=True)
-    expected = {f"M{i}" for i in range(6)}
-    observed = set(schedule["treatment"])
-    if observed != expected:
-        raise ValueError(
-            "La tabla estructurada de tratamientos en Ensayo no contiene M0–M5: "
-            f"{sorted(observed)}"
-        )
-    return schedule
+    return pd.DataFrame(rows)
 
 
-def _parse_management_and_water(
-    value_sheet: object,
+def _management_and_water(
+    frames: Mapping[str, pd.DataFrame],
     *,
-    experiment_year: int,
     study_start: pd.Timestamp,
     study_end: pd.Timestamp,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    sheet = value_sheet["Manejo"]  # type: ignore[index]
-    management_rows: list[dict[str, object]] = []
-    water_rows: list[dict[str, object]] = []
-    for row in range(14, 25):
-        management_month = sheet.cell(row, 1).value
-        management_text = sheet.cell(row, 2).value
-        if management_month is not None:
-            month_number = _month_number(management_month)
-            management_rows.append(
-                {
-                    "year": experiment_year,
-                    "month": month_number,
-                    "month_label": _normalize_text(management_month),
-                    "management": _normalize_text(management_text) or pd.NA,
-                    "source_sheet": "Manejo",
-                    "source_row": row,
-                }
-            )
-
-        water_month = sheet.cell(row, 6).value
-        if water_month is not None:
-            month_number = _month_number(water_month)
-            irrigation = pd.to_numeric(sheet.cell(row, 7).value, errors="coerce")
-            rainfall = pd.to_numeric(sheet.cell(row, 8).value, errors="coerce")
-            water_rows.append(
-                {
-                    "year": experiment_year,
-                    "month": month_number,
-                    "month_label": _normalize_text(water_month),
-                    "rainfall_mm": float(rainfall) if pd.notna(rainfall) else 0.0,
-                    "supplemental_irrigation_mm": (
-                        float(irrigation) if pd.notna(irrigation) else 0.0
-                    ),
-                    "source_sheet": "Manejo",
-                    "source_row": row,
-                }
-            )
-
-    management = pd.DataFrame(management_rows)
-    water = pd.DataFrame(water_rows)
+    management = (
+        frames["field_management.csv"].rename(columns={"activity": "management"}).copy()
+    )
+    management["source_dataset"] = "field_management.csv"
+    water = (
+        frames["water_inputs.csv"]
+        .rename(columns={"irrigation_mm": "supplemental_irrigation_mm"})
+        .copy()
+    )
     water["month_start"] = pd.to_datetime(
-        {
-            "year": water["year"],
-            "month": water["month"],
-            "day": np.ones(len(water), dtype=int),
-        }
+        {"year": water["year"], "month": water["month"], "day": 1}
     )
     water["included_in_study_months"] = water["month_start"].between(
         study_start.to_period("M").to_timestamp(),
@@ -355,26 +773,26 @@ def _parse_management_and_water(
     water["irrigated_sector_input_mm"] = (
         water["rainfall_mm"] + water["supplemental_irrigation_mm"]
     )
-
+    water["source_dataset"] = "water_inputs.csv"
     period = water.loc[water["included_in_study_months"]]
+    rainfall = float(period["rainfall_mm"].sum())
+    irrigation = float(period["supplemental_irrigation_mm"].sum())
     totals = pd.DataFrame(
         [
             {
                 "sector": "Secano",
-                "rainfall_mm": float(period["rainfall_mm"].sum()),
+                "rainfall_mm": rainfall,
                 "supplemental_irrigation_mm": 0.0,
-                "gross_input_mm": float(period["rainfall_mm"].sum()),
+                "gross_input_mm": rainfall,
                 "aggregation": "meses calendario que intersectan el ensayo",
                 "study_start": study_start,
                 "study_end": study_end,
             },
             {
                 "sector": "Riego",
-                "rainfall_mm": float(period["rainfall_mm"].sum()),
-                "supplemental_irrigation_mm": float(
-                    period["supplemental_irrigation_mm"].sum()
-                ),
-                "gross_input_mm": float(period["irrigated_sector_input_mm"].sum()),
+                "rainfall_mm": rainfall,
+                "supplemental_irrigation_mm": irrigation,
+                "gross_input_mm": rainfall + irrigation,
                 "aggregation": "meses calendario que intersectan el ensayo",
                 "study_start": study_start,
                 "study_end": study_end,
@@ -384,79 +802,14 @@ def _parse_management_and_water(
     return management, water, totals
 
 
-def _parse_harvest_geometry(value_sheet: object, *, row_spacing_m: float) -> float:
-    """Derive harvested ground area from the workbook description.
-
-    ``Datos_Rto!D3`` can state both total linear metres and an explanatory
-    parenthesis such as ``(1 metro, 2 surcos)``.  The parenthetical values are
-    preferred because multiplying the leading total by the row count would
-    double-count the sampled length.
-    """
-
-    sheet = value_sheet["Datos_Rto"]  # type: ignore[index]
-    raw_description = sheet["D3"].value
-    description = _strip_accents(_normalize_text(raw_description)).casefold()
-
-    parenthetical = re.search(
-        r"\(\s*(\d+(?:[.,]\d+)?)\s*metros?\s*[,;x]\s*" r"(\d+)\s*surcos?\s*\)",
-        description,
-    )
-    if parenthetical:
-        length_per_row_m = float(parenthetical.group(1).replace(",", "."))
-        row_count = int(parenthetical.group(2))
-        return length_per_row_m * row_count * row_spacing_m
-
-    total_linear_metres = re.search(
-        r"(?:corte|muestra)\s+de\s+(\d+(?:[.,]\d+)?)\s*metros?",
-        description,
-    )
-    if total_linear_metres:
-        return float(total_linear_metres.group(1).replace(",", ".")) * row_spacing_m
-
-    length_match = re.search(r"(\d+(?:[.,]\d+)?)\s*metros?", description)
-    rows_match = re.search(r"(\d+)\s*surcos?", description)
-    if length_match and rows_match:
-        length_per_row_m = float(length_match.group(1).replace(",", "."))
-        row_count = int(rows_match.group(1))
-        return length_per_row_m * row_count * row_spacing_m
-
-    raise ValueError(
-        "No se pudo derivar el área de cosecha desde Datos_Rto!D3: "
-        f"{raw_description!r}"
-    )
-
-
-def _agenda_audit_rows(
-    value_sheet: object, experiment_year: int
-) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    ensayo = value_sheet["Ensayo"]  # type: ignore[index]
-    for row in range(19, 34):
-        agenda_date = ensayo.cell(row, 1).value
-        agenda_text = _normalize_text(ensayo.cell(row, 2).value)
-        if not agenda_text:
-            continue
-        parsed = _parse_partial_date(agenda_date, year=experiment_year)
-        if pd.notna(parsed) and pd.Timestamp(parsed).year != experiment_year:
-            rows.append(
-                {
-                    "severity": "warning",
-                    "issue": "agenda_year_conflict",
-                    "location": f"Ensayo!A{row}:B{row}",
-                    "detail": (
-                        "La fecha de la agenda cae fuera del año declarado del ensayo; "
-                        "la tabla estructurada F:H se usa como calendario canónico."
-                    ),
-                    "observed": pd.Timestamp(parsed),
-                }
-            )
-
-    return rows
-
-
-def _application_sampling_audit_rows(
-    schedule: pd.DataFrame, sample_dates: tuple[pd.Timestamp, ...]
-) -> list[dict[str, object]]:
+def _source_audit(
+    *,
+    schedule: pd.DataFrame,
+    sample_dates: tuple[pd.Timestamp, ...],
+    management: pd.DataFrame,
+    quality: pd.DataFrame,
+    dry_matter: pd.DataFrame,
+) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     sample_set = set(sample_dates)
     for record in schedule.itertuples(index=False):
@@ -465,184 +818,130 @@ def _application_sampling_audit_rows(
         ):
             if (
                 pd.notna(application_date)
-                and pd.Timestamp(cast(Any, application_date)) in sample_set
+                and pd.Timestamp(application_date) in sample_set
             ):
                 rows.append(
                     {
                         "severity": "warning",
                         "issue": "application_and_sampling_same_date",
-                        "location": str(record.source_range),
+                        "location": "field_timeline.csv",
                         "detail": (
                             "Aplicación y muestreo comparten fecha; el orden intradía no "
-                            "está codificado en el libro. No se interpreta el muestreo como "
-                            "respuesta posterior a esa aplicación sin bitácora de campo."
+                            "está documentado y no se interpreta el muestreo como respuesta "
+                            "posterior a esa aplicación."
                         ),
                         "observed": (
                             f"{record.treatment}, aplicación {application_number}, "
-                            f"{pd.Timestamp(cast(Any, application_date)).date()}"
+                            f"{pd.Timestamp(application_date).date()}"
                         ),
                     }
                 )
-
-    return rows
-
-
-def _source_audit(
-    *,
-    value_sheet: object,
-    schedule: pd.DataFrame,
-    sample_dates: tuple[pd.Timestamp, ...],
-    experiment_year: int,
-    formula_coordinates: dict[str, set[str]],
-) -> pd.DataFrame:
-    rows = _agenda_audit_rows(value_sheet, experiment_year)
-    rows.extend(_application_sampling_audit_rows(schedule, sample_dates))
-
-    manejo = value_sheet["Manejo"]  # type: ignore[index]
-    april_text = _normalize_text(manejo["B17"].value)
-    if april_text:
+    april = management.loc[management["month"].eq(4), "management"].dropna()
+    if not april.empty:
         rows.append(
             {
                 "severity": "warning",
                 "issue": "common_n_active_dose_unresolved",
-                "location": "Manejo!B17",
+                "location": "field_management.csv:2025-04",
                 "detail": (
-                    "El libro registra masa de producto, pero no codifica su fracción de N. "
-                    "No se transforma a kg N ha-1 ni se suma al N experimental."
+                    "El registro conserva la masa de producto, pero no codifica su "
+                    "fracción de N; no se transforma a kg N/ha ni se suma al N experimental."
                 ),
-                "observed": april_text,
+                "observed": str(april.iloc[0]),
             }
         )
-
-    calidad = value_sheet["Calidad"]  # type: ignore[index]
-    estimated_rows: list[int] = []
-    for row in range(2, calidad.max_row + 1):
-        origin = _strip_accents(_normalize_text(calidad.cell(row, 14).value)).casefold()
-        if "estim" in origin:
-            estimated_rows.append(row)
-    if estimated_rows:
+    estimated = quality.loc[quality["measurement_status"].eq("estimated"), "sample_id"]
+    if not estimated.empty:
         rows.append(
             {
                 "severity": "warning",
                 "issue": "estimated_quality_values_present",
-                "location": "Calidad!N:N",
+                "location": "quality_recorded.csv:measurement_status",
                 "detail": (
-                    "Las filas marcadas como estimadas se conservan en columnas de auditoría, "
-                    "pero se excluyen del análisis primario de mediciones."
+                    "La muestra estimada se conserva para auditoría, pero se excluye "
+                    "del análisis primario de mediciones."
                 ),
-                "observed": ", ".join(str(row) for row in estimated_rows),
+                "observed": ", ".join(str(value) for value in estimated),
             }
         )
-
-    ms_formula_count = sum(
-        coordinate.startswith("L")
-        for coordinate in formula_coordinates.get("Datos_MS", set())
-    )
+    difference = dry_matter["biomass_recalculation_difference_kg_ha"].abs().dropna()
     rows.append(
         {
             "severity": "info",
-            "issue": "biomass_storage_is_mixed",
-            "location": "Datos_MS!L:L",
+            "issue": "biomass_materialization_reconciled",
+            "location": "dry_matter_calculated.csv",
             "detail": (
-                "KgMS/ha aparece como fórmula en algunas filas y como valor literal en otras. "
-                "El análisis lo recalcula uniformemente desde peso verde, %MS y distancia "
-                "entre hileras."
+                "La biomasa se recalcula uniformemente desde peso verde, porcentaje "
+                "de materia seca y geometría; la materialización histórica se conserva "
+                "solo para conciliación."
             ),
-            "observed": ms_formula_count,
+            "observed": float(difference.max()) if not difference.empty else np.nan,
         }
     )
-
     return pd.DataFrame(rows)
 
 
 def _variable_lineage() -> pd.DataFrame:
     rows = [
         (
-            "Fecha, condición, tratamiento, bloque, muestra",
+            "Fecha, sector, tratamiento, bloque y muestra",
             "metadata",
-            "workbook",
-            "Identificadores registrados.",
+            "CSV canónicos",
+            "Identificadores normalizados.",
         ),
-        ("Peso verde por metro", "recorded", "Datos_MS", "Entrada para biomasa."),
         (
-            "Peso verde de submuestra",
+            "Pesos y conteos de campo",
             "recorded",
-            "Datos_MS",
-            "Entrada para auditoría de %MS.",
+            "dry_matter_recorded.csv y harvest_recorded.csv",
+            "Mediciones primitivas.",
         ),
-        ("Peso seco", "recorded", "Datos_MS", "Entrada para auditoría de %MS."),
         (
-            "%MS",
+            "Materia seca registrada",
             "recorded_method_not_encoded",
-            "Datos_MS",
+            "dry_matter_recorded.csv",
             "El valor está registrado; el procedimiento exacto no está codificado.",
         ),
         (
-            "KgMS/ha registrado",
-            "calculated_in_workbook / reported_derived_without_formula",
-            "Datos_MS",
-            "La forma de almacenamiento varía por fila.",
+            "Biomasa materializada",
+            "calculated_materialization",
+            "dry_matter_calculated.csv",
+            "Se conserva para conciliación con la migración.",
         ),
         (
             "Biomasa usada",
             "analysis_derived",
-            "Peso verde, %MS y geometría",
-            "Se recalcula con una sola identidad para todas las filas.",
+            "Mediciones primitivas y geometría",
+            "Se recalcula uniformemente para todas las filas.",
         ),
         (
-            "%N, %FDA, %FDN",
-            "recorded / estimated_in_workbook",
-            "Calidad",
-            "El campo Origen del dato y el tipo de celda separan medición de estimación.",
+            "N, FDA y FDN",
+            "recorded / estimated",
+            "quality_recorded.csv y missing_quality_estimate.csv",
+            "La medición y la estimación DBCA permanecen separadas.",
         ),
         (
-            "KgN/ha del libro",
-            "calculated_in_workbook / estimated_in_workbook",
-            "Calidad",
-            "Fórmula del libro conservada solo para auditoría.",
+            "N acumulado e INN materializados",
+            "calculated_materialization",
+            "quality_calculated.csv",
+            "Resultados verificables de formulas.json.",
         ),
         (
-            "INN del libro",
-            "calculated_in_workbook / estimated_in_workbook",
-            "Calidad",
-            "Fórmula histórica del libro conservada solo para auditoría.",
-        ),
-        (
-            "N acumulado usado",
+            "N acumulado e INN usados",
             "analysis_derived",
-            "Biomasa recalculada y %N primario",
-            "Producto determinista; la fila estimada no entra al análisis primario.",
+            "Biomasa recalculada, N primario y curva crítica",
+            "La muestra estimada no entra al análisis primario.",
         ),
-        (
-            "INN usado",
-            "analysis_derived",
-            "Biomasa recalculada, %N primario y curva crítica",
-            "Índice determinista; se mantiene una curva de sensibilidad.",
-        ),
-        (
-            "Panojas, peso sucio, peso limpio",
-            "recorded",
-            "Datos_Rto",
-            "Mediciones primitivas de cosecha.",
-        ),
-        ("Tres pesos de 100 semillas", "recorded", "Datos_Rto", "Réplicas técnicas."),
         (
             "Peso de mil semillas",
-            "calculated_in_workbook / analysis_derived",
-            "Datos_Rto",
-            "Promedio de réplicas × 10; se recalcula y audita.",
+            "calculated_materialization / analysis_derived",
+            "harvest_calculated.csv",
+            "Promedio de tres réplicas por diez.",
         ),
         (
-            "Densidad de panojas",
+            "Rendimientos y componentes",
             "analysis_derived",
-            "Panojas y área cosechada",
-            "Transformación geométrica.",
-        ),
-        (
-            "Rendimientos limpio y sucio",
-            "analysis_derived",
-            "Masas y área cosechada",
-            "Transformación geométrica.",
+            "Mediciones de cosecha y geometría",
+            "Transformaciones deterministas.",
         ),
         (
             "Semillas estimadas por panoja",
@@ -651,27 +950,26 @@ def _variable_lineage() -> pd.DataFrame:
             "Reconstrucción, no conteo independiente.",
         ),
         (
-            "Índice de cosecha",
+            "EAN y productividad aparente del agua",
             "analysis_derived",
-            "Rendimiento limpio y biomasa final",
-            "Cociente determinista.",
-        ),
-        (
-            "EAN",
-            "analysis_derived",
-            "Rendimiento y M0 del mismo bloque",
-            "Transformación del rendimiento; uso descriptivo.",
-        ),
-        (
-            "Productividad aparente del agua",
-            "analysis_derived",
-            "Rendimiento y entradas brutas mensuales",
-            "No equivale a agua consumida por el cultivo.",
+            "Rendimiento, M0 y aportes mensuales",
+            "Indicadores descriptivos.",
         ),
     ]
     return pd.DataFrame(
         rows, columns=["variable", "status", "source", "interpretation"]
     )
+
+
+def _apply_dry_matter_policy(frame: pd.DataFrame, policy: DryMatterPolicy) -> pd.Series:
+    used = frame["dry_matter_pct"].copy()
+    if policy == "ratio":
+        used.loc[frame["dry_matter_issue"]] = frame.loc[
+            frame["dry_matter_issue"], "dry_matter_pct_from_weights"
+        ]
+    elif policy == "exclude":
+        used.loc[frame["dry_matter_issue"]] = np.nan
+    return used
 
 
 def _build_qa(
@@ -741,10 +1039,10 @@ def _build_qa(
         bool(not date_counts.empty and date_counts.min() == len(sample_dates)),
     )
     max_w1000_difference = float(
-        (harvest["w1000_g"] - harvest["w1000_workbook_g"]).abs().max()
+        (harvest["w1000_g"] - harvest["w1000_materialized_g"]).abs().max()
     )
     add(
-        "max |PMS recomputed - workbook|",
+        "max |PMS recomputed - materialized|",
         max_w1000_difference,
         "<= 1e-10 g",
         bool(max_w1000_difference <= 1e-10),
@@ -764,22 +1062,22 @@ def _build_qa(
         severity="info",
     )
     measured_q = longitudinal.loc[
-        longitudinal["quality_status"].eq("recorded"),
-        "q_workbook_recompute_difference",
+        longitudinal["quality_status"].eq("measured"),
+        "q_materialized_recompute_difference",
     ].dropna()
     add(
-        "max |N accumulated recomputed - workbook| for measured rows",
+        "max |N accumulated recomputed - materialized| for measured rows",
         float(measured_q.abs().max()) if not measured_q.empty else np.nan,
         "reported as reconciliation diagnostic",
         True,
         severity="info",
     )
     measured_nni = longitudinal.loc[
-        longitudinal["quality_status"].eq("recorded"),
-        "nni_sensitivity_workbook_difference",
+        longitudinal["quality_status"].eq("measured"),
+        "nni_sensitivity_materialized_difference",
     ].dropna()
     add(
-        "max |sensitivity NNI recomputed - workbook| for measured rows",
+        "max |sensitivity NNI recomputed - materialized| for measured rows",
         float(measured_nni.abs().max()) if not measured_nni.empty else np.nan,
         "reported as reconciliation diagnostic",
         True,
@@ -788,17 +1086,8 @@ def _build_qa(
     return pd.DataFrame(rows)
 
 
-def _apply_dry_matter_policy(frame: pd.DataFrame, policy: DryMatterPolicy) -> pd.Series:
-    used = frame["%MS"].copy()
-    if policy == "ratio":
-        used.loc[frame["dm_issue"]] = frame.loc[frame["dm_issue"], "dm_ratio_pct"]
-    elif policy == "exclude":
-        used.loc[frame["dm_issue"]] = np.nan
-    return used
-
-
 def load_experiment_data(
-    workbook_path: Path | str | None = None,
+    data_dir: Path | str | None = None,
     *,
     project_root: Path | None = None,
     dry_matter_policy: DryMatterPolicy = "recorded",
@@ -810,530 +1099,369 @@ def load_experiment_data(
     dm_absolute_difference_threshold: float = 5.0,
     dm_relative_difference_threshold: float = 0.20,
 ) -> ExperimentData:
-    """Load and reconstruct the experiment from the XLSX workbook.
-
-    Parameters controlling NNI are scientific assumptions rather than observed
-    data.  They are explicit so a notebook can display them as methodology.
-    """
+    """Load, validate, and reconstruct the experiment from canonical CSV data."""
 
     if dry_matter_policy not in {"recorded", "ratio", "exclude"}:
         raise ValueError("dry_matter_policy debe ser recorded, ratio o exclude")
+    path = locate_data_dir(data_dir, project_root=project_root)
+    frames = validate_data_bundle(path)
+    metadata = _metadata_values(frames["experiment_metadata.csv"])
+    design = frames["experimental_design.csv"]
+    treatments = tuple(sorted(design["treatment"].astype(str).unique()))
+    blocks = tuple(sorted(design["block"].astype(str).unique()))
+    experiment_year = int(metadata["experiment_year"])
+    schedule = _schedule_from_timeline(
+        frames["field_timeline.csv"], treatments, experiment_year
+    )
 
-    path = locate_workbook(workbook_path, project_root=project_root)
-    formula_coordinates = _formula_coordinates(path)
-    value_book = load_workbook(path, data_only=True, read_only=False)
-    try:
-        ensayo = value_book["Ensayo"]
-        experiment_year = int(ensayo["B6"].value)
-        repetitions = int(ensayo["B13"].value)
-        plot_area_m2 = float(ensayo["B10"].value)
-        experimental_n_total = float(ensayo["B8"].value)
-        application_count = int(ensayo["B9"].value)
-        dose_per_application = experimental_n_total / application_count
-        schedule = _parse_schedule(value_book, experiment_year=experiment_year)
+    dry = frames["dry_matter_recorded.csv"].merge(
+        frames["dry_matter_calculated.csv"],
+        on="observation_id",
+        validate="one_to_one",
+    )
+    dry["dry_matter_issue"] = (
+        dry["dry_matter_abs_difference_pp"].ge(dm_absolute_difference_threshold)
+        & dry["dry_matter_relative_difference"].ge(dm_relative_difference_threshold)
+    ).fillna(False)
+    dry["dm_pct_used"] = _apply_dry_matter_policy(dry, dry_matter_policy)
+    area = float(metadata["biomass_sample_area_m2"])
+    dry["biomass_kg_ha"] = (
+        dry["green_weight_1m_g"] * (dry["dm_pct_used"] / 100.0) * 10.0 / area
+    )
+    dry["biomass_recompute_difference"] = (
+        dry["biomass_kg_ha"] - dry["biomass_reported_kg_ha"]
+    )
+    dry["biomass_calculation_status"] = "calculated_materialization"
+    dry["dm_pct_status"] = "recorded_method_not_encoded"
+    baseline = dry.loc[
+        ~dry["treatment"].astype(str).str.fullmatch(r"M[0-5]", na=False)
+    ].copy()
+    experimental = dry.loc[
+        dry["treatment"].astype(str).str.fullmatch(r"M[0-5]", na=False)
+    ].copy()
 
-        ms_sheet = value_book["Datos_MS"]
-        row_spacing_m = float(ms_sheet["K3"].value) / 100.0
-        biomass_sample_area_m2 = row_spacing_m
-        harvest_sample_area_m2 = _parse_harvest_geometry(
-            value_book,
-            row_spacing_m=row_spacing_m,
-        )
-
-        raw_ms = pd.read_excel(path, sheet_name="Datos_MS", header=4)
-        raw_quality = pd.read_excel(path, sheet_name="Calidad", header=0)
-        raw_harvest = pd.read_excel(path, sheet_name="Datos_Rto", header=4)
-
-        ms = raw_ms.copy()
-        ms["_excel_row"] = np.arange(6, 6 + len(ms))
-        ms["Condición"] = ms["Condición"].map(_normalize_sector)
-        ms["Tratamiento"] = ms["Tratamiento"].map(_normalize_treatment)
-        ms["Repetición"] = ms["Repetición"].map(_normalize_block)
-        ms["Fecha"] = pd.to_datetime(ms["Fecha"], errors="coerce")
-        ms["Muestra"] = pd.to_numeric(ms["Muestra"], errors="coerce").astype("Int64")
-        ms = _coerce_numeric(
-            ms,
-            [
-                "Macollos/30 cm",
-                "Peso verde (1m)",
-                "Peso verde (muestra)",
-                "Banjeda",
-                "Peso Seco",
-                "%MS",
-                "KgMS/ha",
-                "Macollos/m2",
-            ],
-        )
-        ms["dm_ratio_pct"] = 100.0 * ms["Peso Seco"] / ms["Peso verde (muestra)"]
-        ms["dm_abs_difference_pp"] = (ms["%MS"] - ms["dm_ratio_pct"]).abs()
-        ms["dm_relative_difference"] = ms["dm_abs_difference_pp"] / ms[
-            "%MS"
-        ].abs().replace(0.0, np.nan)
-        ms["dm_issue"] = (
-            ms["dm_abs_difference_pp"].ge(dm_absolute_difference_threshold)
-            & ms["dm_relative_difference"].ge(dm_relative_difference_threshold)
-        ).fillna(False)
-        ms["dm_pct_used"] = _apply_dry_matter_policy(ms, dry_matter_policy)
-
-        ms["biomass_kg_ha_recomputed"] = (
-            ms["Peso verde (1m)"]
-            * (ms["dm_pct_used"] / 100.0)
-            * 10.0
-            / biomass_sample_area_m2
-        )
-        ms["biomass_recompute_difference"] = (
-            ms["biomass_kg_ha_recomputed"] - ms["KgMS/ha"]
-        )
-        ms["kgms_workbook_status"] = [
-            _cell_status(
-                formula_coordinates=formula_coordinates,
-                sheet="Datos_MS",
-                column_number=12,
-                excel_row=int(row),
-                semantically_derived=True,
-            )
-            for row in ms["_excel_row"]
+    quality = frames["quality_recorded.csv"].merge(
+        frames["quality_calculated.csv"], on="sample_id", validate="one_to_one"
+    )
+    quality["n_pct_recorded"] = quality["n_pct"]
+    quality["n_pct_primary"] = quality["n_pct"]
+    quality["adf_primary"] = quality["adf_pct"]
+    quality["ndf_primary"] = quality["ndf_pct"]
+    if include_estimated_quality:
+        estimated = quality["measurement_status"].eq("estimated")
+        quality.loc[estimated, "n_pct_primary"] = quality.loc[
+            estimated, "estimated_n_pct"
         ]
-        ms["dm_pct_status"] = "recorded_method_not_encoded"
-
-        baseline_ms = ms.loc[
-            ~ms["Tratamiento"].str.fullmatch(TREATMENT_PATTERN, na=False)
-        ].copy()
-        experimental_ms = ms.loc[
-            ms["Tratamiento"].str.fullmatch(TREATMENT_PATTERN, na=False)
-        ].copy()
-
-        quality = raw_quality.copy()
-        quality["_excel_row"] = np.arange(2, 2 + len(quality))
-        quality["Condición"] = quality["Condición"].map(_normalize_sector)
-        quality["Tratamiento"] = quality["Tratamiento"].map(_normalize_treatment)
-        quality["Repetición"] = quality["Repetición"].map(_normalize_block)
-        quality["Fecha"] = pd.to_datetime(quality["Fecha"], errors="coerce")
-        quality["Muestra"] = pd.to_numeric(quality["Muestra"], errors="coerce").astype(
-            "Int64"
+        quality.loc[estimated, "adf_primary"] = quality.loc[
+            estimated, "estimated_adf_pct"
+        ]
+        quality.loc[estimated, "ndf_primary"] = quality.loc[
+            estimated, "estimated_ndf_pct"
+        ]
+    else:
+        quality.loc[quality["measurement_status"].ne("measured"), "n_pct_primary"] = (
+            np.nan
         )
-        quality = _coerce_numeric(
-            quality, ["%MS", "KgMS/ha", "% N", "% FDA ", "% FDN ", "KgN/ha", "INN"]
-        )
-        quality["origin_normalized"] = quality["Origen del dato"].map(
-            lambda value: _strip_accents(_normalize_text(value)).casefold()
-        )
-        quality["quality_status"] = np.select(
-            [
-                quality["origin_normalized"].str.contains("medid", na=False),
-                quality["origin_normalized"].str.contains("estim", na=False),
-            ],
-            ["recorded", "estimated_in_workbook"],
-            default="missing",
-        )
-        quality["n_pct_recorded"] = quality["% N"]
-        quality["n_pct_primary"] = quality["% N"]
-        if not include_estimated_quality:
-            quality.loc[quality["quality_status"].ne("recorded"), "n_pct_primary"] = (
-                np.nan
-            )
 
-        quality_columns = {
-            "n_pct_cell_status": (9, False),
-            "adf_cell_status": (10, False),
-            "ndf_cell_status": (11, False),
-            "q_workbook_cell_status": (12, True),
-            "nni_workbook_cell_status": (13, True),
-        }
-        for status_column, (
-            column_number,
-            semantically_derived,
-        ) in quality_columns.items():
-            statuses: list[DataStatus] = []
-            for excel_row, origin_status in zip(
-                quality["_excel_row"],
-                quality["quality_status"],
-                strict=True,
-            ):
-                if origin_status == "estimated_in_workbook":
-                    statuses.append("estimated_in_workbook")
-                else:
-                    statuses.append(
-                        _cell_status(
-                            formula_coordinates=formula_coordinates,
-                            sheet="Calidad",
-                            column_number=column_number,
-                            excel_row=int(excel_row),
-                            semantically_derived=semantically_derived,
-                        )
-                    )
-            quality[status_column] = statuses
-
-        key = ["Fecha", "Muestra", "Condición", "Tratamiento", "Repetición"]
-        longitudinal = experimental_ms[
+    key = ["date", "sample_id", "sector", "treatment", "block"]
+    longitudinal = experimental[
+        key
+        + [
+            "dry_matter_pct",
+            "dry_matter_pct_from_weights",
+            "dry_matter_abs_difference_pp",
+            "dry_matter_relative_difference",
+            "dry_matter_issue",
+            "dm_pct_used",
+            "biomass_reported_kg_ha",
+            "biomass_kg_ha",
+            "biomass_recompute_difference",
+            "biomass_calculation_status",
+            "dm_pct_status",
+        ]
+    ].merge(
+        quality[
             key
             + [
-                "_excel_row",
-                "%MS",
-                "dm_ratio_pct",
-                "dm_abs_difference_pp",
-                "dm_relative_difference",
-                "dm_issue",
-                "dm_pct_used",
-                "KgMS/ha",
-                "biomass_kg_ha_recomputed",
-                "biomass_recompute_difference",
-                "kgms_workbook_status",
-                "dm_pct_status",
+                "lab_registration",
+                "n_pct_recorded",
+                "n_pct_primary",
+                "adf_primary",
+                "ndf_primary",
+                "n_accumulated_kg_ha",
+                "nni",
+                "data_origin",
+                "measurement_status",
             ]
-        ].merge(
-            quality[
-                key
-                + [
-                    "REG. DE LAB.",
-                    "% N",
-                    "n_pct_primary",
-                    "% FDA ",
-                    "% FDN ",
-                    "KgN/ha",
-                    "INN",
-                    "Origen del dato",
-                    "quality_status",
-                    "n_pct_cell_status",
-                    "adf_cell_status",
-                    "ndf_cell_status",
-                    "q_workbook_cell_status",
-                    "nni_workbook_cell_status",
-                ]
-            ],
-            on=key,
-            how="left",
-            validate="one_to_one",
-        )
-        longitudinal = longitudinal.rename(
-            columns={
-                "Fecha": "date",
-                "Muestra": "sample_id",
-                "Condición": "sector",
-                "Tratamiento": "treatment",
-                "Repetición": "block",
-                "%MS": "dm_pct_recorded",
-                "KgMS/ha": "biomass_kg_ha_workbook",
-                "biomass_kg_ha_recomputed": "biomass_kg_ha",
-                "% N": "n_pct_recorded",
-                "n_pct_primary": "n_pct",
-                "% FDA ": "adf_pct",
-                "% FDN ": "ndf_pct",
-                "KgN/ha": "q_kg_n_ha_workbook",
-                "INN": "nni_workbook",
-                "REG. DE LAB.": "lab_id",
-                "Origen del dato": "data_origin",
-            }
-        )
-        longitudinal["q_kg_n_ha"] = (
-            longitudinal["biomass_kg_ha"] * longitudinal["n_pct"] / 100.0
-        )
-        biomass_t_ha = longitudinal["biomass_kg_ha"] / 1000.0
-        valid_biomass = biomass_t_ha.where(biomass_t_ha.gt(0.0))
-        critical_primary = nni_primary_coefficient * valid_biomass.pow(
-            nni_primary_exponent
-        )
-        critical_sensitivity = nni_sensitivity_coefficient * valid_biomass.pow(
-            nni_sensitivity_exponent
-        )
-        longitudinal["nni_primary"] = longitudinal["n_pct"] / critical_primary
-        longitudinal["nni_sensitivity"] = longitudinal["n_pct"] / critical_sensitivity
-        longitudinal["q_workbook_recompute_difference"] = (
-            longitudinal["q_kg_n_ha"] - longitudinal["q_kg_n_ha_workbook"]
-        )
-        longitudinal["nni_sensitivity_workbook_difference"] = (
-            longitudinal["nni_sensitivity"] - longitudinal["nni_workbook"]
-        )
-        longitudinal["plot_id"] = (
-            longitudinal["sector"].astype(str)
-            + "_"
-            + longitudinal["block"].astype(str)
-            + "_"
-            + longitudinal["treatment"].astype(str)
-        )
-
-        sample_dates = tuple(
-            pd.Timestamp(value)
-            for value in sorted(longitudinal["date"].dropna().unique())
-        )
-        if not sample_dates:
-            raise ValueError("No se encontraron fechas experimentales en Datos_MS.")
-        date_labels = {
-            value: pd.Timestamp(value).strftime("%d %b").lower()
-            for value in sample_dates
+        ],
+        on=key,
+        how="left",
+        validate="one_to_one",
+    )
+    longitudinal = longitudinal.rename(
+        columns={
+            "dry_matter_pct": "dm_pct_recorded",
+            "dry_matter_pct_from_weights": "dm_ratio_pct",
+            "dry_matter_abs_difference_pp": "dm_abs_difference_pp",
+            "dry_matter_relative_difference": "dm_relative_difference",
+            "dry_matter_issue": "dm_issue",
+            "biomass_reported_kg_ha": "biomass_kg_ha_materialized",
+            "biomass_calculation_status": "kgms_materialized_status",
+            "lab_registration": "lab_id",
+            "n_pct_primary": "n_pct",
+            "adf_primary": "adf_pct",
+            "ndf_primary": "ndf_pct",
+            "n_accumulated_kg_ha": "q_kg_n_ha_materialized",
+            "nni": "nni_materialized",
+            "measurement_status": "quality_status",
         }
-        longitudinal["date_label"] = longitudinal["date"].map(date_labels)
+    )
+    longitudinal["n_pct_cell_status"] = np.where(
+        longitudinal["quality_status"].eq("estimated"), "estimated", "recorded"
+    )
+    longitudinal["adf_cell_status"] = longitudinal["n_pct_cell_status"]
+    longitudinal["ndf_cell_status"] = longitudinal["n_pct_cell_status"]
+    longitudinal["q_materialized_status"] = np.where(
+        longitudinal["quality_status"].eq("estimated"),
+        "estimated",
+        "calculated_materialization",
+    )
+    longitudinal["nni_materialized_status"] = longitudinal["q_materialized_status"]
+    longitudinal["q_kg_n_ha"] = (
+        longitudinal["biomass_kg_ha"] * longitudinal["n_pct"] / 100.0
+    )
+    biomass_t_ha = longitudinal["biomass_kg_ha"] / 1000.0
+    valid_biomass = biomass_t_ha.where(biomass_t_ha.gt(0.0))
+    critical_primary = nni_primary_coefficient * valid_biomass.pow(nni_primary_exponent)
+    critical_sensitivity = nni_sensitivity_coefficient * valid_biomass.pow(
+        nni_sensitivity_exponent
+    )
+    longitudinal["nni_primary"] = longitudinal["n_pct"] / critical_primary
+    longitudinal["nni_sensitivity"] = longitudinal["n_pct"] / critical_sensitivity
+    longitudinal["q_materialized_recompute_difference"] = (
+        longitudinal["q_kg_n_ha"] - longitudinal["q_kg_n_ha_materialized"]
+    )
+    longitudinal["nni_sensitivity_materialized_difference"] = (
+        longitudinal["nni_sensitivity"] - longitudinal["nni_materialized"]
+    )
+    longitudinal["plot_id"] = (
+        longitudinal["sector"].astype(str)
+        + "_"
+        + longitudinal["block"].astype(str)
+        + "_"
+        + longitudinal["treatment"].astype(str)
+    )
+    sample_dates = tuple(
+        pd.Timestamp(value) for value in sorted(longitudinal["date"].dropna().unique())
+    )
+    if not sample_dates:
+        raise ValueError(
+            "No se encontraron fechas experimentales en los CSV canónicos."
+        )
+    date_labels = {
+        value: pd.Timestamp(value).strftime("%d %b").lower() for value in sample_dates
+    }
+    longitudinal["date_label"] = longitudinal["date"].map(date_labels)
 
-        # Harvest rows are selected by treatment before positional renaming to
-        # avoid footer text in the worksheet.
-        harvest = raw_harvest.copy()
-        harvest["_excel_row"] = np.arange(6, 6 + len(harvest))
-        harvest["Condición"] = harvest["Condición"].map(_normalize_sector)
-        harvest["Tratamiento"] = harvest["Tratamiento"].map(_normalize_treatment)
-        harvest["Repetición"] = harvest["Repetición"].map(_normalize_block)
-        harvest = harvest.loc[
-            harvest["Tratamiento"].str.fullmatch(TREATMENT_PATTERN, na=False)
-        ].copy()
-        columns = list(harvest.columns)
-        rename_by_position = {
-            columns[0]: "date",
-            columns[1]: "sample_id",
-            columns[2]: "sector",
-            columns[3]: "treatment",
-            columns[4]: "block",
-            columns[5]: "panicle_count",
-            columns[6]: "dirty_mass_g",
-            columns[7]: "clean_mass_g",
-            columns[8]: "w100_1_g",
-            columns[9]: "w100_2_g",
-            columns[10]: "w100_3_g",
-            columns[11]: "w1000_workbook_g",
-        }
-        harvest = harvest.rename(columns=rename_by_position)
-        keep = list(rename_by_position.values()) + ["_excel_row"]
-        harvest = harvest[keep].copy()
-        harvest["date"] = pd.to_datetime(harvest["date"], errors="coerce")
-        harvest["sample_id"] = pd.to_numeric(
-            harvest["sample_id"], errors="coerce"
-        ).astype("Int64")
-        harvest = _coerce_numeric(
-            harvest,
-            [
-                "panicle_count",
-                "dirty_mass_g",
-                "clean_mass_g",
-                "w100_1_g",
-                "w100_2_g",
-                "w100_3_g",
-                "w1000_workbook_g",
-            ],
+    harvest = (
+        frames["harvest_recorded.csv"]
+        .merge(
+            frames["harvest_calculated.csv"], on="observation_id", validate="one_to_one"
         )
-        harvest["w1000_g"] = (
-            harvest[["w100_1_g", "w100_2_g", "w100_3_g"]].mean(axis=1) * 10.0
-        )
-        harvest["w1000_workbook_status"] = [
-            _cell_status(
-                formula_coordinates=formula_coordinates,
-                sheet="Datos_Rto",
-                column_number=12,
-                excel_row=int(row),
-                semantically_derived=True,
-            )
-            for row in harvest["_excel_row"]
-        ]
-        harvest["panicle_density_m2"] = (
-            harvest["panicle_count"] / harvest_sample_area_m2
-        )
-        harvest["dirty_yield_kg_ha"] = (
-            harvest["dirty_mass_g"] * 10.0 / harvest_sample_area_m2
-        )
-        harvest["clean_yield_kg_ha"] = (
-            harvest["clean_mass_g"] * 10.0 / harvest_sample_area_m2
-        )
-        harvest["clean_recovery"] = harvest["clean_mass_g"] / harvest["dirty_mass_g"]
-        harvest["cleaning_loss_pct"] = 100.0 * (1.0 - harvest["clean_recovery"])
-        harvest["estimated_seed_count"] = (
-            1000.0 * harvest["clean_mass_g"] / harvest["w1000_g"]
-        )
-        harvest["estimated_seeds_per_panicle"] = (
-            harvest["estimated_seed_count"] / harvest["panicle_count"]
-        )
-        harvest["plot_id"] = (
-            harvest["sector"].astype(str)
-            + "_"
-            + harvest["block"].astype(str)
-            + "_"
-            + harvest["treatment"].astype(str)
-        )
-
-        final_date = max(sample_dates)
-        final_biomass = longitudinal.loc[
-            longitudinal["date"].eq(final_date),
-            ["plot_id", "biomass_kg_ha", "dm_issue"],
-        ]
-        harvest = harvest.merge(
-            final_biomass, on="plot_id", how="left", validate="one_to_one"
-        )
-        harvest["harvest_index_pct"] = (
-            100.0 * harvest["clean_yield_kg_ha"] / harvest["biomass_kg_ha"]
-        )
-
-        application_dates = [
-            pd.Timestamp(cast(Any, value))
-            for value in schedule[["first_application", "second_application"]]
-            .stack()
-            .dropna()
-        ]
-        study_start = min([*application_dates, *sample_dates])
-        study_end = max(max(sample_dates), pd.Timestamp(harvest["date"].max()))
-        management, water_monthly, water_period_totals = _parse_management_and_water(
-            value_book,
-            experiment_year=experiment_year,
-            study_start=pd.Timestamp(study_start),
-            study_end=pd.Timestamp(study_end),
-        )
-        water_map = water_period_totals.set_index("sector")["gross_input_mm"]
-        harvest["gross_water_input_mm"] = harvest["sector"].map(water_map)
-        harvest["apparent_water_productivity"] = (
-            harvest["clean_yield_kg_ha"] / harvest["gross_water_input_mm"]
-        )
-
-        m0_reference = harvest.loc[
-            harvest["treatment"].eq("M0"),
-            ["sector", "block", "clean_yield_kg_ha"],
-        ].rename(columns={"clean_yield_kg_ha": "m0_yield_same_block"})
-        harvest = harvest.merge(
-            m0_reference, on=["sector", "block"], how="left", validate="many_to_one"
-        )
-        harvest["agronomic_efficiency"] = np.where(
-            harvest["treatment"].eq("M0"),
-            np.nan,
-            (harvest["clean_yield_kg_ha"] - harvest["m0_yield_same_block"])
-            / experimental_n_total,
-        )
-
-        treatments = tuple(schedule["treatment"].tolist())
-        sectors = tuple(
-            sorted(
-                longitudinal["sector"].dropna().unique(),
-                key=lambda value: (
-                    ["Secano", "Riego"].index(value)
-                    if value in {"Secano", "Riego"}
-                    else 99
-                ),
-            )
-        )
-        blocks = tuple(sorted(longitudinal["block"].dropna().unique()))
-        schedule["extra_n_kg_ha"] = np.where(
-            schedule["treatment"].eq("M0"), 0.0, experimental_n_total
-        )
-        schedule["dose_per_application_kg_ha"] = np.where(
-            schedule["treatment"].eq("M0"),
-            0.0,
-            dose_per_application,
-        )
-        schedule["application_count"] = np.where(
-            schedule["treatment"].eq("M0"), 0, application_count
-        )
-
-        audit = _source_audit(
-            value_sheet=value_book,
-            schedule=schedule,
-            sample_dates=sample_dates,
-            experiment_year=experiment_year,
-            formula_coordinates=formula_coordinates,
-        )
-        spec = ExperimentSpec(
-            workbook_path=path,
-            source_sha256=sha256_file(path),
-            experiment_year=experiment_year,
-            treatments=treatments,
-            sectors=sectors,
-            blocks=blocks,
-            repetitions=repetitions,
-            plot_area_m2=plot_area_m2,
-            row_spacing_m=row_spacing_m,
-            biomass_sample_area_m2=biomass_sample_area_m2,
-            harvest_sample_area_m2=harvest_sample_area_m2,
-            experimental_n_total_kg_ha=experimental_n_total,
-            applications_per_treatment=application_count,
-            dose_per_application_kg_ha=dose_per_application,
-            schedule=schedule.reset_index(drop=True),
-            management=management.reset_index(drop=True),
-            water_monthly=water_monthly.reset_index(drop=True),
-            water_period_totals=water_period_totals.reset_index(drop=True),
-            source_audit=audit.reset_index(drop=True),
-        )
-
-        for frame in (longitudinal, harvest):
-            frame["sector"] = pd.Categorical(
-                frame["sector"], categories=list(sectors), ordered=True
-            )
-            frame["block"] = pd.Categorical(
-                frame["block"], categories=list(blocks), ordered=True
-            )
-            frame["treatment"] = pd.Categorical(
-                frame["treatment"], categories=list(treatments), ordered=True
-            )
-        longitudinal["date"] = pd.Categorical(
-            longitudinal["date"], categories=list(sample_dates), ordered=True
-        )
-
-        seed_weight_long = harvest.melt(
-            id_vars=["plot_id", "sector", "block", "treatment", "sample_id"],
-            value_vars=["w100_1_g", "w100_2_g", "w100_3_g"],
-            var_name="technical_replicate",
-            value_name="w100_g",
-        )
-
-        baseline_biomass = baseline_ms.loc[
-            baseline_ms["biomass_kg_ha_recomputed"].notna(),
-            ["Fecha", "Muestra", "Condición", "Repetición", "biomass_kg_ha_recomputed"],
-        ].rename(
+        .rename(
             columns={
-                "Fecha": "date",
-                "Muestra": "sample_id",
-                "Condición": "sector",
-                "Repetición": "block",
-                "biomass_kg_ha_recomputed": "biomass_kg_ha",
+                "dirty_seed_mass_g": "dirty_mass_g",
+                "clean_seed_mass_g": "clean_mass_g",
+                "w100_rep1_g": "w100_1_g",
+                "w100_rep2_g": "w100_2_g",
+                "w100_rep3_g": "w100_3_g",
+                "w1000_g": "w1000_materialized_g",
+                "panicle_count": "panicle_count",
             }
         )
-        baseline_tillers = baseline_ms.loc[
-            baseline_ms["Macollos/m2"].notna(),
-            ["Fecha", "Muestra", "Condición", "Repetición", "Macollos/m2"],
-        ].rename(
-            columns={
-                "Fecha": "date",
-                "Muestra": "sample_id",
-                "Condición": "sector",
-                "Repetición": "replicate_label",
-                "Macollos/m2": "tillers_m2",
-            }
-        )
+    )
+    harvest_area = float(metadata["harvest_sample_area_m2"])
+    harvest["w1000_g"] = (
+        harvest[["w100_1_g", "w100_2_g", "w100_3_g"]].mean(axis=1) * 10.0
+    )
+    harvest["panicle_density_m2"] = harvest["panicle_count"] / harvest_area
+    harvest["dirty_yield_kg_ha"] = harvest["dirty_mass_g"] * 10.0 / harvest_area
+    harvest["clean_yield_kg_ha"] = harvest["clean_mass_g"] * 10.0 / harvest_area
+    harvest["clean_recovery"] = harvest["clean_mass_g"] / harvest["dirty_mass_g"]
+    harvest["cleaning_loss_pct"] = 100.0 * (1.0 - harvest["clean_recovery"])
+    harvest["estimated_seed_count"] = (
+        1000.0 * harvest["clean_mass_g"] / harvest["w1000_g"]
+    )
+    harvest["estimated_seeds_per_panicle"] = (
+        harvest["estimated_seed_count"] / harvest["panicle_count"]
+    )
+    harvest["w1000_materialized_status"] = "calculated_materialization"
+    harvest["plot_id"] = (
+        harvest["sector"].astype(str)
+        + "_"
+        + harvest["block"].astype(str)
+        + "_"
+        + harvest["treatment"].astype(str)
+    )
+    final_date = max(sample_dates)
+    final_biomass = longitudinal.loc[
+        longitudinal["date"].eq(final_date), ["plot_id", "biomass_kg_ha", "dm_issue"]
+    ]
+    harvest = harvest.drop(columns=["harvest_index_pct"]).merge(
+        final_biomass, on="plot_id", how="left", validate="one_to_one"
+    )
+    harvest["harvest_index_pct"] = (
+        100.0 * harvest["clean_yield_kg_ha"] / harvest["biomass_kg_ha"]
+    )
 
-        longitudinal = longitudinal.sort_values(
-            ["sector", "block", "treatment", "date"]
-        ).reset_index(drop=True)
-        harvest = harvest.sort_values(["sector", "block", "treatment"]).reset_index(
-            drop=True
-        )
-        qa = _build_qa(
-            spec=spec,
-            longitudinal=longitudinal,
-            harvest=harvest,
-            sample_dates=sample_dates,
-        )
-        failed_errors = qa.loc[qa["severity"].eq("error") & ~qa["passes"]]
-        if not failed_errors.empty:
-            raise AssertionError(failed_errors.to_string(index=False))
+    application_dates = [
+        pd.Timestamp(value)
+        for value in schedule[["first_application", "second_application"]]
+        .stack()
+        .dropna()
+    ]
+    study_start = min([*application_dates, *sample_dates])
+    study_end = max(max(sample_dates), pd.Timestamp(harvest["date"].max()))
+    management, water_monthly, water_period_totals = _management_and_water(
+        frames, study_start=study_start, study_end=study_end
+    )
+    water_map = water_period_totals.set_index("sector")["gross_input_mm"]
+    harvest["gross_water_input_mm"] = harvest["sector"].map(water_map)
+    harvest["apparent_water_productivity"] = (
+        harvest["clean_yield_kg_ha"] / harvest["gross_water_input_mm"]
+    )
+    m0_reference = harvest.loc[
+        harvest["treatment"].eq("M0"), ["sector", "block", "clean_yield_kg_ha"]
+    ].rename(columns={"clean_yield_kg_ha": "m0_yield_same_block"})
+    harvest = harvest.merge(
+        m0_reference, on=["sector", "block"], how="left", validate="many_to_one"
+    )
+    experimental_n_total = float(metadata["experimental_n_total_kg_ha"])
+    harvest["agronomic_efficiency"] = np.where(
+        harvest["treatment"].eq("M0"),
+        np.nan,
+        (harvest["clean_yield_kg_ha"] - harvest["m0_yield_same_block"])
+        / experimental_n_total,
+    )
 
-        return ExperimentData(
-            spec=spec,
-            longitudinal=longitudinal,
-            harvest=harvest,
-            seed_weight_long=seed_weight_long.reset_index(drop=True),
-            baseline_biomass=baseline_biomass.reset_index(drop=True),
-            baseline_tillers=baseline_tillers.reset_index(drop=True),
-            variable_lineage=_variable_lineage(),
-            qa=qa,
+    sectors = tuple(
+        sorted(
+            longitudinal["sector"].dropna().astype(str).unique(),
+            key=lambda value: (value != "Secano", value),
         )
-    finally:
-        value_book.close()
+    )
+    audit = _source_audit(
+        schedule=schedule,
+        sample_dates=sample_dates,
+        management=management,
+        quality=quality,
+        dry_matter=dry,
+    )
+    spec = ExperimentSpec(
+        data_dir=path,
+        source_sha256=sha256_data_bundle(path),
+        experiment_year=experiment_year,
+        treatments=treatments,
+        sectors=sectors,
+        blocks=blocks,
+        repetitions=int(metadata["repetitions"]),
+        plot_area_m2=float(metadata["plot_area_m2"]),
+        row_spacing_m=float(metadata["row_spacing_cm"]) / 100.0,
+        biomass_sample_area_m2=area,
+        harvest_sample_area_m2=harvest_area,
+        experimental_n_total_kg_ha=experimental_n_total,
+        applications_per_treatment=int(metadata["applications_per_treatment"]),
+        dose_per_application_kg_ha=float(metadata["dose_per_application_kg_ha"]),
+        schedule=schedule.reset_index(drop=True),
+        management=management.reset_index(drop=True),
+        water_monthly=water_monthly.reset_index(drop=True),
+        water_period_totals=water_period_totals.reset_index(drop=True),
+        source_audit=audit.reset_index(drop=True),
+    )
+    for frame in (longitudinal, harvest):
+        frame["sector"] = pd.Categorical(
+            frame["sector"], categories=list(sectors), ordered=True
+        )
+        frame["block"] = pd.Categorical(
+            frame["block"], categories=list(blocks), ordered=True
+        )
+        frame["treatment"] = pd.Categorical(
+            frame["treatment"], categories=list(treatments), ordered=True
+        )
+    longitudinal["date"] = pd.Categorical(
+        longitudinal["date"], categories=list(sample_dates), ordered=True
+    )
+
+    seed_weight_long = harvest.melt(
+        id_vars=["plot_id", "sector", "block", "treatment", "sample_id"],
+        value_vars=["w100_1_g", "w100_2_g", "w100_3_g"],
+        var_name="technical_replicate",
+        value_name="w100_g",
+    )
+    baseline_biomass = baseline.loc[
+        baseline["biomass_recorded_dm_kg_ha"].notna(),
+        ["date", "sample_id", "sector", "block", "biomass_recorded_dm_kg_ha"],
+    ].rename(columns={"biomass_recorded_dm_kg_ha": "biomass_kg_ha"})
+    baseline_tillers = baseline.loc[
+        baseline["tiller_density_m2"].notna(),
+        ["date", "sample_id", "sector", "block", "tiller_density_m2"],
+    ].rename(columns={"block": "replicate_label", "tiller_density_m2": "tillers_m2"})
+    longitudinal = longitudinal.sort_values(
+        ["sector", "block", "treatment", "date"]
+    ).reset_index(drop=True)
+    harvest = harvest.sort_values(["sector", "block", "treatment"]).reset_index(
+        drop=True
+    )
+    qa = _build_qa(
+        spec=spec, longitudinal=longitudinal, harvest=harvest, sample_dates=sample_dates
+    )
+    failed = qa.loc[qa["severity"].eq("error") & ~qa["passes"]]
+    if not failed.empty:
+        raise AssertionError(failed.to_string(index=False))
+    return ExperimentData(
+        spec=spec,
+        longitudinal=longitudinal,
+        harvest=harvest,
+        seed_weight_long=seed_weight_long.reset_index(drop=True),
+        baseline_biomass=baseline_biomass.reset_index(drop=True),
+        baseline_tillers=baseline_tillers.reset_index(drop=True),
+        variable_lineage=_variable_lineage(),
+        qa=qa,
+    )
 
 
 def source_provenance_table(data: ExperimentData) -> pd.DataFrame:
-    """Compact provenance table suitable for notebook display."""
+    """Compact canonical-bundle provenance for notebook display."""
 
     spec = data.spec
+    csv_count = len(list(spec.data_dir.glob("*.csv")))
     return pd.DataFrame(
         [
             {
-                "source_file": spec.workbook_path.name,
-                "source_path": str(spec.workbook_path),
+                "source_kind": "canonical_csv_bundle",
+                "source_path": str(spec.data_dir),
                 "sha256": spec.source_sha256,
+                "csv_files": csv_count,
                 "experiment_year": spec.experiment_year,
                 "dry_matter_rows": len(data.longitudinal),
                 "harvest_rows": len(data.harvest),
             }
         ]
     )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Validate the canonical Festuca CSV bundle."
+    )
+    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
+    arguments = parser.parse_args()
+    frames = validate_data_bundle(cast(Path, arguments.data_dir))
+    print(
+        f"Validated {len(frames)} canonical datasets in "
+        f"{cast(Path, arguments.data_dir).resolve()}"
+    )
+
+
+if __name__ == "__main__":
+    main()

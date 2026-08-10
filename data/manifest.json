@@ -1,0 +1,880 @@
+{
+  "schema_version": 1,
+  "authority": "canonical_csv_bundle",
+  "migration": {
+    "historical_source_file": "sources/Datos_Ema_Serrana_INN.xlsx",
+    "historical_source_sha256": "0a26aba4cb1cde3187ea5ffc8151036fc4302ce7ddc89ed046b0bce870efeae1",
+    "historical_workbook_role": "migration evidence only",
+    "transformations": [
+      "Normalized Diseño treatment typo MO to M0.",
+      "Consolidated Ensayo schedule and activity notes into one atomic timeline.",
+      "Fixed all experimental dates to 2025 and retained M3 application 2 on 2025-08-21.",
+      "Separated recorded values from calculated materializations.",
+      "Removed duplicated dry-matter and biomass fields from quality data.",
+      "Dropped trivial water total rows; totals are validated from monthly inputs.",
+      "Replaced the legacy circular quality-estimation graph with an acyclic DBCA calculation sequence."
+    ]
+  },
+  "datasets": {
+    "experimental_design.csv": {
+      "future_sheet_name_es": "Diseño experimental",
+      "grain_es": "Una fila por posición de parcela dentro de cada bloque.",
+      "role": "recorded",
+      "primary_key": [
+        "block",
+        "plot_position"
+      ],
+      "foreign_keys": [],
+      "sort_by": [
+        "block",
+        "plot_position"
+      ],
+      "columns": {
+        "block": {
+          "display_name_es": "Bloque",
+          "type": "string",
+          "nullable": false
+        },
+        "plot_position": {
+          "display_name_es": "Posición de parcela",
+          "type": "integer",
+          "nullable": false
+        },
+        "treatment": {
+          "display_name_es": "Tratamiento",
+          "type": "string",
+          "nullable": false
+        }
+      }
+    },
+    "experiment_metadata.csv": {
+      "future_sheet_name_es": "Información del ensayo",
+      "grain_es": "Una fila por parámetro del ensayo.",
+      "role": "recorded",
+      "primary_key": [
+        "parameter"
+      ],
+      "foreign_keys": [],
+      "sort_by": [
+        "parameter"
+      ],
+      "columns": {
+        "parameter": {
+          "display_name_es": "Parámetro",
+          "type": "string",
+          "nullable": false
+        },
+        "value": {
+          "display_name_es": "Valor",
+          "type": "string",
+          "nullable": false
+        },
+        "value_type": {
+          "display_name_es": "Tipo de valor",
+          "type": "string",
+          "nullable": false
+        },
+        "unit": {
+          "display_name_es": "Unidad",
+          "type": "string",
+          "nullable": true
+        },
+        "legacy_source": {
+          "display_name_es": "Referencia histórica",
+          "type": "string",
+          "nullable": false
+        }
+      }
+    },
+    "field_timeline.csv": {
+      "future_sheet_name_es": "Cronograma experimental",
+      "grain_es": "Una fila por evento de campo atómico.",
+      "role": "recorded",
+      "primary_key": [
+        "event_id"
+      ],
+      "foreign_keys": [],
+      "sort_by": [
+        "date",
+        "event_id"
+      ],
+      "columns": {
+        "event_id": {
+          "display_name_es": "Identificador del evento",
+          "type": "string",
+          "nullable": false
+        },
+        "date": {
+          "display_name_es": "Fecha",
+          "type": "date",
+          "nullable": false
+        },
+        "event_type": {
+          "display_name_es": "Tipo de evento",
+          "type": "string",
+          "nullable": false
+        },
+        "scope": {
+          "display_name_es": "Alcance",
+          "type": "string",
+          "nullable": false
+        },
+        "treatment": {
+          "display_name_es": "Tratamiento",
+          "type": "string",
+          "nullable": true
+        },
+        "application_number": {
+          "display_name_es": "Número de aplicación",
+          "type": "integer",
+          "nullable": true
+        },
+        "growth_stage": {
+          "display_name_es": "Estado fenológico",
+          "type": "string",
+          "nullable": true
+        },
+        "description": {
+          "display_name_es": "Descripción",
+          "type": "string",
+          "nullable": false
+        },
+        "within_day_order_known": {
+          "display_name_es": "Orden intradía conocido",
+          "type": "boolean",
+          "nullable": true
+        }
+      }
+    },
+    "soil_analysis.csv": {
+      "future_sheet_name_es": "Análisis de suelo",
+      "grain_es": "Una fila por determinación de suelo.",
+      "role": "recorded",
+      "primary_key": [
+        "parameter"
+      ],
+      "foreign_keys": [],
+      "sort_by": [
+        "parameter"
+      ],
+      "columns": {
+        "parameter": {
+          "display_name_es": "Parámetro",
+          "type": "string",
+          "nullable": false
+        },
+        "value": {
+          "display_name_es": "Valor",
+          "type": "number",
+          "nullable": false
+        },
+        "unit": {
+          "display_name_es": "Unidad",
+          "type": "string",
+          "nullable": true
+        }
+      }
+    },
+    "field_management.csv": {
+      "future_sheet_name_es": "Manejo del cultivo",
+      "grain_es": "Una fila por mes calendario.",
+      "role": "recorded",
+      "primary_key": [
+        "year",
+        "month"
+      ],
+      "foreign_keys": [],
+      "sort_by": [
+        "year",
+        "month"
+      ],
+      "columns": {
+        "year": {
+          "display_name_es": "Año",
+          "type": "integer",
+          "nullable": false
+        },
+        "month": {
+          "display_name_es": "Mes",
+          "type": "integer",
+          "nullable": false
+        },
+        "month_label": {
+          "display_name_es": "Nombre del mes",
+          "type": "string",
+          "nullable": false
+        },
+        "activity": {
+          "display_name_es": "Actividad de manejo",
+          "type": "string",
+          "nullable": true
+        }
+      }
+    },
+    "water_inputs.csv": {
+      "future_sheet_name_es": "Aportes de agua",
+      "grain_es": "Una fila por mes calendario.",
+      "role": "recorded",
+      "primary_key": [
+        "year",
+        "month"
+      ],
+      "foreign_keys": [],
+      "sort_by": [
+        "year",
+        "month"
+      ],
+      "columns": {
+        "year": {
+          "display_name_es": "Año",
+          "type": "integer",
+          "nullable": false
+        },
+        "month": {
+          "display_name_es": "Mes",
+          "type": "integer",
+          "nullable": false
+        },
+        "month_label": {
+          "display_name_es": "Nombre del mes",
+          "type": "string",
+          "nullable": false
+        },
+        "irrigation_mm": {
+          "display_name_es": "Riego suplementario",
+          "type": "number",
+          "nullable": false,
+          "unit": "mm"
+        },
+        "rainfall_mm": {
+          "display_name_es": "Precipitación",
+          "type": "number",
+          "nullable": false,
+          "unit": "mm"
+        }
+      }
+    },
+    "dry_matter_recorded.csv": {
+      "future_sheet_name_es": "Materia seca - datos registrados",
+      "grain_es": "Una fila por observación de biomasa o macollos.",
+      "role": "recorded",
+      "primary_key": [
+        "observation_id"
+      ],
+      "foreign_keys": [],
+      "sort_by": [
+        "date",
+        "sector",
+        "treatment",
+        "block"
+      ],
+      "columns": {
+        "observation_id": {
+          "display_name_es": "Identificador de observación",
+          "type": "string",
+          "nullable": false
+        },
+        "date": {
+          "display_name_es": "Fecha",
+          "type": "date",
+          "nullable": false
+        },
+        "sample_id": {
+          "display_name_es": "Muestra",
+          "type": "integer",
+          "nullable": true
+        },
+        "sector": {
+          "display_name_es": "Sector hídrico",
+          "type": "string",
+          "nullable": false
+        },
+        "treatment": {
+          "display_name_es": "Tratamiento",
+          "type": "string",
+          "nullable": false
+        },
+        "block": {
+          "display_name_es": "Bloque",
+          "type": "string",
+          "nullable": false
+        },
+        "tillers_30_cm": {
+          "display_name_es": "Macollos en 30 cm",
+          "type": "number",
+          "nullable": true,
+          "unit": "macollos/30 cm"
+        },
+        "green_weight_1m_g": {
+          "display_name_es": "Peso verde en un metro",
+          "type": "number",
+          "nullable": true,
+          "unit": "g"
+        },
+        "green_weight_sample_g": {
+          "display_name_es": "Peso verde de la muestra",
+          "type": "number",
+          "nullable": true,
+          "unit": "g"
+        },
+        "tray_weight_g": {
+          "display_name_es": "Peso de bandeja",
+          "type": "number",
+          "nullable": true,
+          "unit": "g"
+        },
+        "dry_weight_g": {
+          "display_name_es": "Peso seco",
+          "type": "number",
+          "nullable": true,
+          "unit": "g"
+        },
+        "dry_matter_pct": {
+          "display_name_es": "Materia seca registrada",
+          "type": "number",
+          "nullable": true,
+          "unit": "%"
+        }
+      }
+    },
+    "dry_matter_calculated.csv": {
+      "future_sheet_name_es": "Materia seca - cálculos",
+      "grain_es": "Una fila calculada por observación de materia seca.",
+      "role": "calculated",
+      "primary_key": [
+        "observation_id"
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "observation_id"
+          ],
+          "references": "dry_matter_recorded.csv"
+        }
+      ],
+      "sort_by": [
+        "observation_id"
+      ],
+      "columns": {
+        "observation_id": {
+          "display_name_es": "Identificador de observación",
+          "type": "string",
+          "nullable": false
+        },
+        "dry_matter_pct_from_weights": {
+          "display_name_es": "Materia seca reconstruida",
+          "type": "number",
+          "nullable": true,
+          "unit": "%"
+        },
+        "dry_matter_abs_difference_pp": {
+          "display_name_es": "Diferencia absoluta de materia seca",
+          "type": "number",
+          "nullable": true,
+          "unit": "puntos porcentuales"
+        },
+        "dry_matter_relative_difference": {
+          "display_name_es": "Diferencia relativa de materia seca",
+          "type": "number",
+          "nullable": true,
+          "unit": "proporción"
+        },
+        "dry_matter_issue": {
+          "display_name_es": "Registro de materia seca a verificar",
+          "type": "boolean",
+          "nullable": false
+        },
+        "biomass_reported_kg_ha": {
+          "display_name_es": "Biomasa informada en el libro histórico",
+          "type": "number",
+          "nullable": true,
+          "unit": "kg MS/ha"
+        },
+        "biomass_recorded_dm_kg_ha": {
+          "display_name_es": "Biomasa recalculada con materia seca registrada",
+          "type": "number",
+          "nullable": true,
+          "unit": "kg MS/ha"
+        },
+        "biomass_ratio_dm_kg_ha": {
+          "display_name_es": "Biomasa recalculada con materia seca reconstruida",
+          "type": "number",
+          "nullable": true,
+          "unit": "kg MS/ha"
+        },
+        "biomass_recalculation_difference_kg_ha": {
+          "display_name_es": "Diferencia entre biomasa recalculada e informada",
+          "type": "number",
+          "nullable": true,
+          "unit": "kg MS/ha"
+        },
+        "tiller_density_m2": {
+          "display_name_es": "Densidad de macollos",
+          "type": "number",
+          "nullable": true,
+          "unit": "macollos/m2"
+        }
+      }
+    },
+    "harvest_recorded.csv": {
+      "future_sheet_name_es": "Rendimiento - datos registrados",
+      "grain_es": "Una fila por parcela cosechada.",
+      "role": "recorded",
+      "primary_key": [
+        "observation_id"
+      ],
+      "foreign_keys": [],
+      "sort_by": [
+        "sector",
+        "block",
+        "treatment"
+      ],
+      "columns": {
+        "observation_id": {
+          "display_name_es": "Identificador de observación",
+          "type": "string",
+          "nullable": false
+        },
+        "date": {
+          "display_name_es": "Fecha",
+          "type": "date",
+          "nullable": false
+        },
+        "sample_id": {
+          "display_name_es": "Muestra",
+          "type": "integer",
+          "nullable": false
+        },
+        "sector": {
+          "display_name_es": "Sector hídrico",
+          "type": "string",
+          "nullable": false
+        },
+        "treatment": {
+          "display_name_es": "Tratamiento",
+          "type": "string",
+          "nullable": false
+        },
+        "block": {
+          "display_name_es": "Bloque",
+          "type": "string",
+          "nullable": false
+        },
+        "panicle_count": {
+          "display_name_es": "Panojas en el área cosechada",
+          "type": "number",
+          "nullable": false,
+          "unit": "panojas"
+        },
+        "dirty_seed_mass_g": {
+          "display_name_es": "Peso de semilla sin limpiar",
+          "type": "number",
+          "nullable": false,
+          "unit": "g"
+        },
+        "clean_seed_mass_g": {
+          "display_name_es": "Peso de semilla limpia",
+          "type": "number",
+          "nullable": false,
+          "unit": "g"
+        },
+        "w100_rep1_g": {
+          "display_name_es": "Peso de 100 semillas - réplica 1",
+          "type": "number",
+          "nullable": false,
+          "unit": "g"
+        },
+        "w100_rep2_g": {
+          "display_name_es": "Peso de 100 semillas - réplica 2",
+          "type": "number",
+          "nullable": false,
+          "unit": "g"
+        },
+        "w100_rep3_g": {
+          "display_name_es": "Peso de 100 semillas - réplica 3",
+          "type": "number",
+          "nullable": false,
+          "unit": "g"
+        }
+      }
+    },
+    "harvest_calculated.csv": {
+      "future_sheet_name_es": "Rendimiento - cálculos",
+      "grain_es": "Una fila calculada por parcela cosechada.",
+      "role": "calculated",
+      "primary_key": [
+        "observation_id"
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "observation_id"
+          ],
+          "references": "harvest_recorded.csv"
+        }
+      ],
+      "sort_by": [
+        "observation_id"
+      ],
+      "columns": {
+        "observation_id": {
+          "display_name_es": "Identificador de observación",
+          "type": "string",
+          "nullable": false
+        },
+        "w1000_g": {
+          "display_name_es": "Peso de mil semillas",
+          "type": "number",
+          "nullable": false,
+          "unit": "g"
+        },
+        "panicle_density_m2": {
+          "display_name_es": "Densidad de panojas",
+          "type": "number",
+          "nullable": false,
+          "unit": "panojas/m2"
+        },
+        "dirty_yield_kg_ha": {
+          "display_name_es": "Rendimiento sin limpiar",
+          "type": "number",
+          "nullable": false,
+          "unit": "kg/ha"
+        },
+        "clean_yield_kg_ha": {
+          "display_name_es": "Rendimiento limpio",
+          "type": "number",
+          "nullable": false,
+          "unit": "kg/ha"
+        },
+        "clean_recovery": {
+          "display_name_es": "Recuperación de limpieza",
+          "type": "number",
+          "nullable": false,
+          "unit": "proporción"
+        },
+        "cleaning_loss_pct": {
+          "display_name_es": "Merma de limpieza",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "estimated_seed_count": {
+          "display_name_es": "Número estimado de semillas",
+          "type": "number",
+          "nullable": false,
+          "unit": "semillas"
+        },
+        "estimated_seeds_per_panicle": {
+          "display_name_es": "Semillas estimadas por panoja",
+          "type": "number",
+          "nullable": false,
+          "unit": "semillas/panoja"
+        },
+        "harvest_index_pct": {
+          "display_name_es": "Índice de cosecha",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        }
+      }
+    },
+    "quality_recorded.csv": {
+      "future_sheet_name_es": "Calidad - datos registrados",
+      "grain_es": "Una fila por muestra de laboratorio o muestra faltante identificada.",
+      "role": "recorded",
+      "primary_key": [
+        "sample_id"
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "sample_id"
+          ],
+          "references": "dry_matter_recorded.csv"
+        }
+      ],
+      "sort_by": [
+        "sample_id"
+      ],
+      "columns": {
+        "sample_id": {
+          "display_name_es": "Muestra",
+          "type": "integer",
+          "nullable": false
+        },
+        "date": {
+          "display_name_es": "Fecha",
+          "type": "date",
+          "nullable": false
+        },
+        "sector": {
+          "display_name_es": "Sector hídrico",
+          "type": "string",
+          "nullable": false
+        },
+        "treatment": {
+          "display_name_es": "Tratamiento",
+          "type": "string",
+          "nullable": false
+        },
+        "block": {
+          "display_name_es": "Bloque",
+          "type": "string",
+          "nullable": false
+        },
+        "lab_registration": {
+          "display_name_es": "Registro de laboratorio",
+          "type": "integer",
+          "nullable": true
+        },
+        "n_pct": {
+          "display_name_es": "Nitrógeno medido",
+          "type": "number",
+          "nullable": true,
+          "unit": "%"
+        },
+        "adf_pct": {
+          "display_name_es": "Fibra detergente ácido medida",
+          "type": "number",
+          "nullable": true,
+          "unit": "%"
+        },
+        "ndf_pct": {
+          "display_name_es": "Fibra detergente neutro medida",
+          "type": "number",
+          "nullable": true,
+          "unit": "%"
+        },
+        "measurement_status": {
+          "display_name_es": "Estado de la medición",
+          "type": "string",
+          "nullable": false
+        },
+        "data_origin": {
+          "display_name_es": "Origen del dato",
+          "type": "string",
+          "nullable": false
+        }
+      }
+    },
+    "quality_calculated.csv": {
+      "future_sheet_name_es": "Calidad - cálculos",
+      "grain_es": "Una fila calculada por muestra de calidad.",
+      "role": "calculated",
+      "primary_key": [
+        "sample_id"
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "sample_id"
+          ],
+          "references": "quality_recorded.csv"
+        }
+      ],
+      "sort_by": [
+        "sample_id"
+      ],
+      "columns": {
+        "sample_id": {
+          "display_name_es": "Muestra",
+          "type": "integer",
+          "nullable": false
+        },
+        "estimated_n_pct": {
+          "display_name_es": "Nitrógeno estimado",
+          "type": "number",
+          "nullable": true,
+          "unit": "%"
+        },
+        "estimated_adf_pct": {
+          "display_name_es": "Fibra detergente ácido estimada",
+          "type": "number",
+          "nullable": true,
+          "unit": "%"
+        },
+        "estimated_ndf_pct": {
+          "display_name_es": "Fibra detergente neutro estimada",
+          "type": "number",
+          "nullable": true,
+          "unit": "%"
+        },
+        "n_accumulated_kg_ha": {
+          "display_name_es": "Nitrógeno acumulado",
+          "type": "number",
+          "nullable": false,
+          "unit": "kg N/ha"
+        },
+        "critical_n_pct": {
+          "display_name_es": "Concentración crítica de nitrógeno",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "nni": {
+          "display_name_es": "Índice de nutrición nitrogenada",
+          "type": "number",
+          "nullable": false,
+          "unit": "proporción"
+        },
+        "calculation_status": {
+          "display_name_es": "Procedencia del cálculo",
+          "type": "string",
+          "nullable": false
+        }
+      }
+    },
+    "missing_quality_estimate.csv": {
+      "future_sheet_name_es": "Estimación de calidad faltante",
+      "grain_es": "Una fila para la muestra de calidad estimada por DBCA.",
+      "role": "calculated",
+      "primary_key": [
+        "sample_id"
+      ],
+      "foreign_keys": [
+        {
+          "columns": [
+            "sample_id"
+          ],
+          "references": "quality_recorded.csv"
+        }
+      ],
+      "sort_by": [
+        "sample_id"
+      ],
+      "columns": {
+        "sample_id": {
+          "display_name_es": "Muestra",
+          "type": "integer",
+          "nullable": false
+        },
+        "date": {
+          "display_name_es": "Fecha",
+          "type": "date",
+          "nullable": false
+        },
+        "sector": {
+          "display_name_es": "Sector hídrico",
+          "type": "string",
+          "nullable": false
+        },
+        "treatment": {
+          "display_name_es": "Tratamiento",
+          "type": "string",
+          "nullable": false
+        },
+        "block": {
+          "display_name_es": "Bloque",
+          "type": "string",
+          "nullable": false
+        },
+        "biomass_kg_ha": {
+          "display_name_es": "Biomasa",
+          "type": "number",
+          "nullable": false,
+          "unit": "kg MS/ha"
+        },
+        "treatment_count": {
+          "display_name_es": "Número de tratamientos",
+          "type": "integer",
+          "nullable": false
+        },
+        "block_count": {
+          "display_name_es": "Número de bloques",
+          "type": "integer",
+          "nullable": false
+        },
+        "n_block_total": {
+          "display_name_es": "Total de N del bloque",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "n_treatment_total": {
+          "display_name_es": "Total de N del tratamiento",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "n_grand_total": {
+          "display_name_es": "Total general de N",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "n_pct_estimated": {
+          "display_name_es": "Nitrógeno estimado",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "adf_block_total": {
+          "display_name_es": "Total de FDA del bloque",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "adf_treatment_total": {
+          "display_name_es": "Total de FDA del tratamiento",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "adf_grand_total": {
+          "display_name_es": "Total general de FDA",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "adf_pct_estimated": {
+          "display_name_es": "FDA estimada",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "ndf_block_total": {
+          "display_name_es": "Total de FDN del bloque",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "ndf_treatment_total": {
+          "display_name_es": "Total de FDN del tratamiento",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "ndf_grand_total": {
+          "display_name_es": "Total general de FDN",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "ndf_pct_estimated": {
+          "display_name_es": "FDN estimada",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "n_accumulated_kg_ha": {
+          "display_name_es": "Nitrógeno acumulado estimado",
+          "type": "number",
+          "nullable": false,
+          "unit": "kg N/ha"
+        },
+        "critical_n_pct": {
+          "display_name_es": "Concentración crítica de nitrógeno",
+          "type": "number",
+          "nullable": false,
+          "unit": "%"
+        },
+        "nni": {
+          "display_name_es": "Índice de nutrición nitrogenada",
+          "type": "number",
+          "nullable": false,
+          "unit": "proporción"
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
-"""Workbook-first classical and longitudinal analysis for the Festuca thesis.
+"""CSV-first classical and longitudinal analysis for the Festuca thesis.
 
 The notebook-facing API keeps presentation cells short.  Every observed value is
-loaded from the XLSX workbook; equations and inferential choices live in code and
+loaded from the canonical CSV bundle; equations and inferential choices live in code and
 notebook markdown.  Generated tables are ordinary pandas DataFrames and can be
 exported as CSV after review.
 """
@@ -66,8 +66,8 @@ PRIMARY_NNI_EXPONENT: Final = -0.42
 SENSITIVITY_NNI_COEFFICIENT: Final = 4.8
 SENSITIVITY_NNI_EXPONENT: Final = -0.32
 LONGITUDINAL_FIGURE_STEMS: Final = (
-    "figura_01_calendario_experimental_desde_xlsx",
-    "figura_02_agua_desde_xlsx",
+    "figura_01_calendario_experimental_desde_csv",
+    "figura_02_agua_desde_csv",
     "trayectorias_observadas_biomass_kg_ha",
     "trayectorias_observadas_n_pct",
     "figura_03_rendimiento_observado",
@@ -122,7 +122,7 @@ def _experimental_n_step_table(
     view_start: pd.Timestamp,
     view_end: pd.Timestamp,
 ) -> pd.DataFrame:
-    """Build the XLSX-backed experimental-N step geometry used by the schedule."""
+    """Build the canonical experimental-N step geometry used by the schedule."""
     rows: list[dict[str, object]] = []
     for treatment in treatments:
         treatment_schedule = schedule.loc[
@@ -225,7 +225,7 @@ class LongitudinalNotebook:
         self,
         *,
         project_root: Path | None = None,
-        workbook_path: Path | str | None = None,
+        data_dir: Path | str | None = None,
         dry_matter_policy: DryMatterPolicy = "recorded",
         bootstrap_replicates: int = 199,
         random_seed: int = 20260807,
@@ -236,7 +236,7 @@ class LongitudinalNotebook:
         print_figure_json: bool = False,
     ) -> None:
         self.project_root = (project_root or PROJECT_ROOT).resolve()
-        self.workbook_path = workbook_path
+        self.data_dir = data_dir
         self.dry_matter_policy = dry_matter_policy
         self.bootstrap_replicates = bootstrap_replicates
         self.random_seed = random_seed
@@ -344,7 +344,7 @@ class LongitudinalNotebook:
 
     def load_data(self) -> pd.DataFrame:
         self.data = load_experiment_data(
-            self.workbook_path,
+            self.data_dir,
             project_root=self.project_root,
             dry_matter_policy=cast(DryMatterPolicy, self.dry_matter_policy),
             include_estimated_quality=False,
@@ -379,9 +379,9 @@ class LongitudinalNotebook:
             "dm_ratio_pct",
             "dm_abs_difference_pp",
             "dm_relative_difference",
-            "biomass_kg_ha_workbook",
+            "biomass_kg_ha_materialized",
             "biomass_kg_ha",
-            "kgms_workbook_status",
+            "kgms_materialized_status",
         ]
         flagged = data.longitudinal.loc[data.longitudinal["dm_issue"], columns]
         return self._show("dry_matter_records_to_verify", flagged)
@@ -548,8 +548,8 @@ class LongitudinalNotebook:
         fig.subplots_adjust(left=0.12, right=0.95, bottom=0.15, top=0.75)
         self._save_figure(
             fig,
-            "figura_01_calendario_experimental_desde_xlsx",
-            title="Calendario y N experimental acumulado desde el libro XLSX",
+            "figura_01_calendario_experimental_desde_csv",
+            title="Calendario y N experimental acumulado desde los datos canónicos",
             subtitle="M0 permanece en 0; M1–M5 avanzan de 0 a 100 y 200 kg N ha⁻¹.",
             note=(
                 "Solo se representa el N experimental respaldado por el libro. Las líneas "
@@ -651,8 +651,8 @@ class LongitudinalNotebook:
         fig.subplots_adjust(left=0.09, right=0.98, bottom=0.25, top=0.80)
         self._save_figure(
             fig,
-            "figura_02_agua_desde_xlsx",
-            title="Entradas brutas de agua registradas en el libro XLSX",
+            "figura_02_agua_desde_csv",
+            title="Entradas brutas de agua registradas en los datos canónicos",
             subtitle="Precipitación y riego suplementario por mes incluido en el período experimental.",
             note=(
                 "Estas entradas no son un balance hídrico ni una estimación del agua consumida. "
@@ -1162,7 +1162,7 @@ class LongitudinalNotebook:
         rows: list[dict[str, object]] = []
         for policy in policies:
             policy_data = load_experiment_data(
-                self.workbook_path,
+                self.data_dir,
                 project_root=self.project_root,
                 dry_matter_policy=policy,
                 include_estimated_quality=False,
@@ -1754,7 +1754,7 @@ class LongitudinalNotebook:
                     "cv_upper_95_pct": float(wide["technical_cv_pct"].quantile(0.95)),
                     "max_cv_pct": float(wide["technical_cv_pct"].max()),
                     "max_abs_w1000_recompute_difference_g": float(
-                        (data.harvest["w1000_g"] - data.harvest["w1000_workbook_g"])
+                        (data.harvest["w1000_g"] - data.harvest["w1000_materialized_g"])
                         .abs()
                         .max()
                     ),
@@ -1923,11 +1923,11 @@ class LongitudinalNotebook:
                     "date": date,
                     "treatment": str(record["treatment"]),
                     "block": str(record["block"]),
-                    "workbook_origin": record["data_origin"],
+                    "data_origin": record["data_origin"],
                     "rcbd_missing_cell_estimate_n_pct": estimate,
                     "primary_complete_case_p": primary_result.global_p,
                     "single_imputation_sensitivity_p": imputed_result.global_p,
-                    "primary_policy": "estimated workbook row excluded",
+                    "primary_policy": "estimated canonical row excluded",
                 }
             )
         return self._show("missing_n_sensitivity", pd.DataFrame(rows))
@@ -2666,12 +2666,12 @@ class LongitudinalNotebook:
             {
                 "domain": "source",
                 "sector": "all",
-                "estimand": "workbook_sha256",
+                "estimand": "canonical_data_sha256",
                 "estimate": data.spec.source_sha256,
                 "interval_low": pd.NA,
                 "interval_high": pd.NA,
                 "p_value": np.nan,
-                "interpretation_template": "all_observed_values_read_from_xlsx",
+                "interpretation_template": "all_observed_values_read_from_canonical_csv",
             }
         )
         return self._show("automatic_summary", pd.DataFrame(rows))

@@ -1,6 +1,6 @@
 """Reproducible analyses for the Festuca nitrogen-timing experiment.
 
-The source loader remains importable without importing the Bayesian stack.  The
+The canonical CSV loader remains importable without importing the Bayesian stack. The
 notebook controllers are resolved lazily so the classical workflow does not
 depend on PyMC at import time.
 """

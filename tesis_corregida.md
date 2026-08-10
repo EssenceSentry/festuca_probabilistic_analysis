@@ -15,8 +15,6 @@ Carrera: Ingeniería Agronómica
 | **Institución:** | Facultad de Agronomía, Universidad de la República |
 | **Año:** | 2026 |
 
-> **Nota de control documental previa a la entrega.** La tabla estructurada de tratamientos y la agenda del mismo libro XLSX contienen discrepancias internas en algunas fechas de aplicación y muestreo. La cronología utilizada en este borrador es la tabla estructurada empleada por los análisis, pero debe contrastarse con una bitácora de campo independiente antes de la defensa o entrega final. Mientras esa verificación no se complete, las comparaciones numéricas entre M1–M5 se interpretan por etiqueta de tratamiento y las atribuciones fenológicas o mecanísticas a fechas exactas se consideran provisionales.
-
 # **Resumen**
 
 Se compararon cinco calendarios compuestos de aplicación de una misma dosis experimental de nitrógeno sobre el crecimiento, el estado nitrogenado, los componentes del rendimiento y el rendimiento de semilla de festuca alta (*Festuca arundinacea* Schreb.) cv. Rizar. Cada calendario M1–M5 estuvo formado por dos aplicaciones que, en conjunto, aportaron 200 kg N ha⁻¹ experimentales. El diseño permite comparar esos cinco paquetes de aplicación, pero no separar causalmente el efecto de la primera fecha, la segunda fecha, el intervalo entre ambas o las condiciones meteorológicas posteriores. M0 no recibió nitrógeno experimental adicional, aunque permaneció bajo el manejo general del semillero; la dosis común de nitrógeno previa al experimento no pudo reconstruirse con los registros analíticos disponibles.
@@ -29,7 +27,7 @@ Los ANOVA por fecha localizaron diferencias entre tratamientos en variables y ev
 
 El número de semillas por panoja fue reconstruido a partir de la masa de semilla limpia, el peso de mil semillas y el número de panojas. Un nulo de reconstrucción mostró que su asociación inversa con la densidad de panojas podía surgir de esa identidad algebraica, por lo que no se interpretó como evidencia independiente de compensación biológica. Cada condición hídrica estuvo representada por un único sector y no se midió el estado hídrico del cultivo; las comparaciones entre sectores fueron descriptivas.
 
-En estos dos sectores y este ciclo no se resolvió un calendario M1–M5 consistentemente superior para el rendimiento final, y la incertidumbre no permite declarar equivalencia. Las fechas exactas de algunas aplicaciones requieren verificación documental independiente antes de cerrar las interpretaciones temporales y fenológicas.
+En estos dos sectores y este ciclo no se resolvió un calendario M1–M5 consistentemente superior para el rendimiento final, y la incertidumbre no permite declarar equivalencia. La cronología experimental correspondió enteramente a 2025; para M4 y M5, la segunda aplicación y el primer muestreo coincidieron el 16 de septiembre, sin registro del orden intradía.
 
 Palabras clave: festuca alta; producción de semilla; fertilización nitrogenada; calendarios de aplicación; modelos longitudinales; Índice de Nutrición Nitrogenada; riego suplementario.
 
@@ -250,39 +248,28 @@ En cada aplicación se distribuyeron 0,522 kg de urea por parcela, equivalentes 
 
 M1–M5 deben interpretarse como **paquetes compuestos de dos aplicaciones**. Los tratamientos difieren simultáneamente en la primera fecha, la segunda fecha, el intervalo entre ambas y las condiciones ambientales posteriores. No existe un diseño factorial que permita atribuir separadamente la respuesta a uno de esos componentes.
 
-### **4.4.1 Estado de verificación de la cronología**
+### **4.4.1 Cronología experimental**
 
-La tabla estructurada de tratamientos del libro XLSX, utilizada por el código, no coincide completamente con la agenda de actividades del mismo archivo. La agenda contiene varios años 2026 en un experimento declarado como 2025, ubica conjuntamente la segunda aplicación de M1 y M2 el 4 de agosto en lugar del 31 de julio y no consigna de forma explícita la segunda aplicación de M3. Estas discrepancias no pueden resolverse mediante análisis estadístico.
+La cronología experimental se consolidó en un único registro de eventos de campo. Todos los eventos ocurrieron en 2025. La segunda aplicación de M1 y M2 se realizó el 4 de agosto y la segunda aplicación de M3 el 21 de agosto.
 
-| Evento | Tabla estructurada usada por los análisis | Agenda del mismo libro |
-| --- | --- | --- |
-| Segunda aplicación de M1 y M2 | 31/07/2025 | 04/08/2026, descrita conjuntamente |
-| Segunda aplicación de M3 | 21/08/2025 | no aparece de forma explícita |
-| Primera aplicación de M4 | 04/08/2025 | 04/08/2026 |
-| Segunda aplicación de M4 | 16/09/2025 | 16/09/2026 |
-| Segunda aplicación de M5 y primer muestreo | 16/09/2025 | 16/09/2025 |
-| Muestreo final | 12/11/2025 | 12/11/2026 |
-
-Antes de la versión final debe recuperarse una fuente independiente y fechada —bitácora de campo, registro del aplicador, mensajes, planillas originales o comprobantes— y establecerse una cronología canónica. Hasta entonces, la Tabla 1 se presenta como **cronología analítica provisional**. Las comparaciones estadísticas por etiqueta M1–M5 no dependen de denominar un tratamiento “temprano” o “tardío”, pero las interpretaciones fenológicas, la dosis acumulada antes de cada muestreo y cualquier figura de calendario sí dependen de la verificación.
-
-Tabla 1. Cronología analítica provisional reproducida de la tabla estructurada empleada por los análisis.
+Tabla 1. Cronología experimental reproducida de la tabla estructurada empleada por los análisis.
 
 | **Tratamiento** | **Primera aplicación** | **Segunda aplicación** | **Nitrógeno experimental total** |
 | --- | --- | --- | --- |
 | M0 | Sin aplicación experimental | Sin aplicación experimental | $0\ \mathrm{kg\ N\ ha^{-1}}$ |
-| M1 | 12 de junio | 31 de julio | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
-| M2 | 27 de junio | 31 de julio | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
+| M1 | 12 de junio | 4 de agosto | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
+| M2 | 27 de junio | 4 de agosto | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
 | M3 | 9 de julio | 21 de agosto | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
 | M4 | 4 de agosto | 16 de septiembre | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
 | M5 | 25 de agosto | 16 de septiembre | $200\ \mathrm{kg\ N\ ha^{-1}}$ |
 
-En la cronología provisional, la primera aplicación de M1 comparte el 12 de junio con la caracterización inicial, y las segundas aplicaciones de M4–M5 comparten el 16 de septiembre con el primer muestreo. El orden intradía tampoco quedó registrado. Por esta razón, la evaluación inicial no se incorporó al análisis longitudinal y no se atribuyó una respuesta posterior a aplicaciones ocurridas el mismo día del muestreo.
+En esta cronología, la primera aplicación de M1 comparte el 12 de junio con la caracterización inicial, y las segundas aplicaciones de M4–M5 comparten el 16 de septiembre con el primer muestreo. El orden intradía no quedó registrado. Por esta razón, la evaluación inicial no se incorporó al análisis longitudinal y no se atribuyó una respuesta posterior a aplicaciones ocurridas el mismo día del muestreo.
 
 ## **4.5 Manejo del cultivo**
 
 ### **4.5.1 Manejo previo y general del semillero**
 
-Durante enero de 2025 el semillero fue utilizado mediante pastoreo rotativo. En marzo se aplicó Diuron 80 % a una dosis de 1,6 kg ha⁻¹ y en abril se realizó una fertilización general con 150 kg ha⁻¹ de urea azufrada. El libro registra la masa de producto, pero no su fracción de nitrógeno ni una identificación comercial verificable. En consecuencia, la dosis común de N de fondo no pudo expresarse en kg N ha⁻¹.
+Durante enero de 2025 el semillero fue utilizado mediante pastoreo rotativo. En marzo se aplicó Diuron 80 % a una dosis de 1,6 kg ha⁻¹ y en abril se realizó una fertilización general con 150 kg ha⁻¹ de urea azufrada. El registro de manejo consigna la masa de producto, pero no su fracción de nitrógeno ni una identificación comercial verificable. En consecuencia, la dosis común de N de fondo no pudo expresarse en kg N ha⁻¹.
 
 Esta incertidumbre no invalida la comparación aleatorizada entre M1–M5, porque todos recibieron el mismo manejo general y la misma dosis experimental total. Tampoco invalida el contraste M1–M5 frente a M0 como respuesta a **200 kg N ha⁻¹ experimentales adicionales**. Sí impide conocer la dosis total recibida por el cultivo y limita la comparación agronómica con estudios de dosis.
 
@@ -705,7 +692,7 @@ Tabla 2. Precipitación y riego suplementario registrados entre junio y noviembr
 
 En la caracterización inicial, la biomasa media fue 3,76 t MS ha⁻¹ en secano y 3,78 t MS ha⁻¹ en el sector destinado a riego; la densidad fue 2526 y 2307 macollos m⁻². Son descripciones de dos sectores, no réplicas del manejo hídrico.
 
-La cronología exacta no pudo cerrarse con el libro XLSX porque su tabla estructurada y su agenda son incompatibles en varios eventos. Los análisis siguientes comparan las etiquetas M1–M5 según la asignación aleatoria y usan la cronología estructurada como convención provisional. Las interpretaciones que dependen de dosis acumulada en una fecha, proximidad a un muestreo o clasificación “temprana/tardía” permanecen condicionadas a verificación externa.
+La cronología canónica ubicó la segunda aplicación de M1 y M2 el 4 de agosto, la de M3 el 21 de agosto y las de M4 y M5 el 16 de septiembre de 2025. El siguiente muestreo longitudinal ocurrió el 16 de septiembre; por lo tanto, corregir la fecha de M1 y M2 no modificó los resultados estadísticos, aunque sí actualizó el calendario y la procedencia documental.
 
 ## **5.2 Dinámica de biomasa y estado nitrogenado**
 
@@ -792,7 +779,7 @@ El 16 de septiembre se detectaron diferencias de nitrógeno acumulado en ambos s
 
 El INN presentó diferencias entre M1–M5 el 16 de septiembre en ambos sectores y el 20 de octubre en riego. En septiembre, M1 y M2 mostraron los valores más altos; en octubre, el orden en riego se desplazó hacia M5 y M4. En noviembre no se detectaron diferencias después del control de multiplicidad.
 
-Según la cronología analítica provisional, la interpretación de septiembre se limitó por la resolución diaria: M4 y M5 tenían una aplicación registrada el mismo día del muestreo y no se conoció el orden de las operaciones. Por lo tanto, no se atribuyó su estado nitrogenado de esa fecha a haber recibido o no esa segunda aplicación.
+Según la cronología experimental, la interpretación de septiembre se limitó por la resolución diaria: M4 y M5 tenían una aplicación registrada el mismo día del muestreo y no se conoció el orden de las operaciones. Por lo tanto, no se atribuyó su estado nitrogenado de esa fecha a haber recibido o no esa segunda aplicación.
 
 La magnitud absoluta del INN dependió de la curva crítica elegida. La curva para festuca alta produjo valores superiores a la curva histórica, aunque el patrón descendente del promedio de M1–M5 entre septiembre y noviembre se conservó.
 
@@ -1019,11 +1006,11 @@ Para concentración de N, el modelo mixto principal mostró evidencia fuerte de 
 
 La varianza del intercepto de parcela estimada en cero y las diferencias de dispersión entre fechas muestran que la estructura mixta simple no capturó de forma convincente toda la dependencia longitudinal. El bootstrap mejora la calibración respecto de una aproximación asintótica, pero hereda el modelo generador. En consecuencia, el estudio longitudinal aporta evidencia exploratoria sobre trayectorias y una advertencia contra inferirlas desde ANOVA aislados; no produce una clasificación definitiva de interacción para cada sector.
 
-La interpretación fisiológica requiere además conocer la cronología real. Mientras no se resuelvan las fechas conflictivas, los resultados sólidos son comparaciones por etiqueta M1–M5 y fecha de muestreo. Las frases sobre aplicaciones “tempranas”, “tardías”, dosis acumulada o proximidad al muestreo son hipótesis condicionadas a la cronología provisional.
+La cronología canónica permite interpretar la secuencia y la dosis acumulada antes de cada muestreo. Sin embargo, el calendario por sí solo no demuestra mecanismos fisiológicos: las descripciones de aplicaciones “tempranas” o “tardías” son relativas a los paquetes comparados y no sustituyen mediciones de fenología, disponibilidad de N, absorción o condiciones posteriores a cada aplicación.
 
 ## **6.3 Componentes del rendimiento**
 
-La densidad de panojas fue la única respuesta final de apoyo detectada entre M1–M5 después del FDR, en el sector regado. Este resultado indica una diferencia entre paquetes, pero no identifica el proceso: no se midieron transición reproductiva, mortalidad de macollos ni emergencia de panojas y la cronología exacta permanece pendiente.
+La densidad de panojas fue la única respuesta final de apoyo detectada entre M1–M5 después del FDR, en el sector regado. Este resultado indica una diferencia entre paquetes, pero no identifica el proceso: no se midieron transición reproductiva, mortalidad de macollos, emergencia de panojas ni estados fenológicos con resolución suficiente.
 
 Las semillas por panoja fueron estimadas, no contadas. El cociente comparte la masa de semilla con el rendimiento y el número de panojas en el denominador. El nulo de reconstrucción mostró que una relación inversa fuerte puede emerger de la fórmula. Como la permutación no preservó el diseño, no constituye una prueba formal; sí basta para descartar la correlación observada como evidencia independiente de compensación.
 
@@ -1048,8 +1035,6 @@ Las correlaciones que incluían M0 estaban dominadas en parte por la separación
 Las variables derivadas contienen acoplamientos matemáticos. N acumulado integra biomasa y concentración; INN integra esas variables y una curva; índice de cosecha contiene rendimiento; merma y semillas estimadas comparten masa de semilla. Las asociaciones se utilizaron para generar hipótesis, no para demostrar mecanismos.
 
 ## **6.7 Limitaciones principales**
-
-La limitación bloqueante es documental: la cronología de tratamiento no tiene una única versión interna. Debe verificarse con una fuente de campo independiente y, si cambia, actualizar Tabla 1, figuras y toda interpretación temporal.
 
 La biomasa se extrapoló desde 1,58 % de la parcela y el rendimiento y los componentes desde 3,17 %. No se documentó el método espacial de selección ni se dispuso de réplicas intraparcela para separar error de submuestreo. La conversión a kg ha⁻¹ no aumenta la cobertura espacial efectiva.
 
@@ -1089,9 +1074,7 @@ El contraste con M0 respaldó una respuesta a N experimental adicional, sin esta
 
 8. El endpoint productivo se extrapoló desde 0,76 m² y corresponde a una fracción considerada limpia sin estandarización de pureza, humedad, viabilidad o germinación. Su interpretación comercial debe limitarse.
 
-9. Antes de la defensa o entrega final debe resolverse la cronología contradictoria con una bitácora independiente. Hasta entonces, son defendibles las comparaciones numéricas por etiqueta de tratamiento, pero no una interpretación cerrada de fechas exactas, dosis acumulada o sincronización fenológica.
-
-10. La generalización requiere repetir el estudio en varios ciclos y sitios, evaluar dosis, registrar fenología y cronología con trazabilidad, documentar submuestreo y limpieza, y replicar unidades hídricas con mediciones de balance de agua.
+9. La generalización requiere repetir el estudio en varios ciclos y sitios, evaluar dosis, registrar fenología y cronología con trazabilidad, documentar submuestreo y limpieza, y replicar unidades hídricas con mediciones de balance de agua.
 
 # **8. Bibliografía**
 

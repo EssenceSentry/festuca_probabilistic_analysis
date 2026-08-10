@@ -1,0 +1,25 @@
+parameter,value,value_type,unit,legacy_source
+producer,La favorita,string,,Ensayo!B3
+forage_common_name,Festuca,string,,Ensayo!A4
+cultivar,Rizar,string,,Ensayo!B4
+sowing_year,2023,integer,year,Ensayo!B5
+experiment_year,2025,integer,year,Ensayo!B6
+experimental_n_total_kg_ha,200.0,number,kg N/ha,Ensayo!B8
+applications_per_treatment,2,integer,applications,Ensayo!B9
+dose_per_application_kg_ha,100.0,number,kg N/ha,derived from Ensayo!B8:B9
+plot_area_m2,24,number,m2,Ensayo!B10
+plot_width_m,4,number,m,Ensayo!B11
+plot_length_m,6,number,m,Ensayo!B12
+repetitions,4,integer,blocks,Ensayo!B13
+urea_per_plot_kg,0.522,number,kg product/plot,Ensayo!B14
+urea_rate_kg_ha,217,number,kg product/ha,Ensayo!B15
+urea_n_pct,46,number,% N,Ensayo!A15
+row_spacing_cm,38.0,number,cm,Datos_MS!K3
+biomass_cut_length_m,1,number,m,Datos_MS!G5
+biomass_sample_area_m2,0.38,number,m2,derived from Datos_MS!K3 and G5
+harvest_length_per_row_m,1.0,number,m,Datos_Rto!D3
+harvest_row_count,2,integer,rows,Datos_Rto!D3
+harvest_sample_area_m2,0.76,number,m2,derived from Datos_Rto!D3 and Datos_MS!K3
+stakes_per_trial,60,integer,stakes,Diseño!F1:G1
+north_marker,N,string,,Diseño!A6
+reference_boundary,CASAS,string,,Diseño!A1

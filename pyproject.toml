@@ -33,6 +33,8 @@ dependencies = [
 festuca-annex = "festuca_analysis.annex:run_all_cli"
 festuca-export-workbook = "festuca_analysis.workbook:main"
 festuca-longitudinal = "festuca_analysis.longitudinal:run_all_longitudinal"
+festuca-rebuild-workbook = "festuca_analysis.xlsx_rebuild:main"
+festuca-validate-data = "festuca_analysis.source_data:main"
 
 [dependency-groups]
 dev = [

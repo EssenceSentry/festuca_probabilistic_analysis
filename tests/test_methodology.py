@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import ast
+import csv
 import json
 import re
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,13 +15,17 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf  # pyright: ignore[reportMissingTypeStubs]
-from openpyxl import load_workbook
 
 from festuca_analysis.longitudinal import (
     LongitudinalNotebook,
     _stable_seed,  # pyright: ignore[reportPrivateUsage]
 )
-from festuca_analysis.source_data import load_experiment_data, sha256_file
+from festuca_analysis.source_data import (
+    load_experiment_data,
+    sha256_data_bundle,
+    sha256_file,
+    validate_data_bundle,
+)
 from festuca_analysis.statistics import (
     benjamini_hochberg,
     fit_mixedlm_best,
@@ -28,6 +35,7 @@ from festuca_analysis.statistics import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WORKBOOK = PROJECT_ROOT / "sources" / "Datos_Ema_Serrana_INN.xlsx"
+DATA_DIR = PROJECT_ROOT / "data"
 NOTEBOOKS = (
     PROJECT_ROOT / "festuca_estudio_longitudinal.ipynb",
     PROJECT_ROOT / "festuca_anexo_probabilistico.ipynb",
@@ -66,30 +74,168 @@ def _festuca_metadata(notebook: NotebookDocument) -> dict[str, object]:
     return cast(dict[str, object], metadata)
 
 
-class WorkbookSourceTests(unittest.TestCase):
+class CanonicalDataSourceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.data = load_experiment_data(WORKBOOK)
+        cls.data = load_experiment_data(DATA_DIR)
 
-    def test_provenance_hash_is_computed_from_the_workbook(self) -> None:
-        self.assertEqual(self.data.spec.source_sha256, sha256_file(WORKBOOK))
+    def test_provenance_hash_is_computed_from_the_canonical_bundle(self) -> None:
+        self.assertEqual(self.data.spec.source_sha256, sha256_data_bundle(DATA_DIR))
 
-    def test_structured_schedule_is_read_from_ensayo(self) -> None:
-        workbook = load_workbook(WORKBOOK, data_only=True, read_only=True)
-        try:
-            worksheet = workbook["Ensayo"]
-            workbook_treatments = [
-                str(worksheet.cell(row, 6).value).strip().upper() for row in range(2, 8)
-            ]
-        finally:
-            workbook.close()
+    def test_historical_workbook_hash_is_preserved_as_migration_evidence(self) -> None:
+        manifest = json.loads((DATA_DIR / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            manifest["migration"]["historical_source_sha256"],
+            sha256_file(WORKBOOK),
+        )
+
+    def test_schedule_is_reconstructed_from_the_atomic_timeline(self) -> None:
         self.assertEqual(
             self.data.spec.schedule["treatment"].tolist(),
-            workbook_treatments,
+            ["M0", "M1", "M2", "M3", "M4", "M5"],
         )
         self.assertEqual(
-            self.data.spec.schedule["source_range"].tolist(),
-            [f"F{row}:H{row}" for row in range(2, 8)],
+            set(self.data.spec.schedule["source_dataset"]),
+            {"field_timeline.csv"},
+        )
+
+    def test_schedule_matches_the_canonical_2025_chronology(self) -> None:
+        schedule = self.data.spec.schedule.set_index("treatment")
+        expected = {
+            "M0": (None, None),
+            "M1": ("2025-06-12", "2025-08-04"),
+            "M2": ("2025-06-27", "2025-08-04"),
+            "M3": ("2025-07-09", "2025-08-21"),
+            "M4": ("2025-08-04", "2025-09-16"),
+            "M5": ("2025-08-25", "2025-09-16"),
+        }
+        for treatment, (first, second) in expected.items():
+            observed_first = schedule.loc[treatment, "first_application"]
+            observed_second = schedule.loc[treatment, "second_application"]
+            if first is None:
+                self.assertTrue(pd.isna(observed_first))
+            else:
+                self.assertEqual(
+                    pd.Timestamp(cast(Any, observed_first)), pd.Timestamp(first)
+                )
+            if second is None:
+                self.assertTrue(pd.isna(observed_second))
+            else:
+                self.assertEqual(
+                    pd.Timestamp(cast(Any, observed_second)), pd.Timestamp(second)
+                )
+
+    def test_all_application_dates_belong_to_2025(self) -> None:
+        application_dates = self.data.spec.schedule[
+            ["first_application", "second_application"]
+        ].stack()
+        self.assertTrue(
+            all(
+                pd.Timestamp(cast(Any, value)).year == 2025
+                for value in application_dates
+            )
+        )
+
+    def test_canonical_timeline_has_no_year_conflict(self) -> None:
+        issues = set(self.data.spec.source_audit["issue"].astype(str))
+        self.assertNotIn("agenda_year_conflict", issues)
+
+    def test_bundle_rejects_application_outside_experiment_year(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            copy = Path(directory) / "data"
+            shutil.copytree(DATA_DIR, copy)
+            timeline = pd.read_csv(copy / "field_timeline.csv")
+            timeline.loc[
+                timeline["event_id"].eq("2025-08-04_m1_application_2"), "date"
+            ] = "2026-08-04"
+            timeline.to_csv(
+                copy / "field_timeline.csv", index=False, lineterminator="\n"
+            )
+            with self.assertRaisesRegex(ValueError, "do not match experiment year"):
+                validate_data_bundle(copy)
+
+    def test_loader_rejects_xlsx_as_an_analytical_source(self) -> None:
+        with self.assertRaisesRegex(ValueError, "evidencia histórica"):
+            load_experiment_data(WORKBOOK)
+
+    def test_manifest_maps_technical_columns_to_spanish_labels(self) -> None:
+        manifest = json.loads((DATA_DIR / "manifest.json").read_text(encoding="utf-8"))
+        datasets = manifest["datasets"]
+        for filename, dataset in datasets.items():
+            self.assertTrue(filename.endswith(".csv"))
+            self.assertTrue(dataset["future_sheet_name_es"])
+            for column in dataset["columns"].values():
+                self.assertTrue(column["display_name_es"])
+
+    def test_formula_metadata_contains_only_semantic_calculations(self) -> None:
+        payload = json.loads((DATA_DIR / "formulas.json").read_text(encoding="utf-8"))
+        manifest = json.loads((DATA_DIR / "manifest.json").read_text(encoding="utf-8"))
+        formulas = payload["formulas"]
+        self.assertGreater(len(formulas), 0)
+        self.assertLess(len(formulas), 438)
+        for formula in formulas:
+            self.assertIn("output_file", formula)
+            self.assertIn("output_column", formula)
+            self.assertIn("expression", formula)
+            self.assertIn("excel_formula_template", formula)
+            self.assertNotIn("cell", formula)
+            self.assertNotIn("cached_value", formula)
+            self.assertNotIn("*", formula["output_column"])
+            self.assertIn(
+                formula["output_column"],
+                manifest["datasets"][formula["output_file"]]["columns"],
+            )
+
+        missing_outputs = {
+            formula["output_column"]
+            for formula in formulas
+            if formula["output_file"] == "missing_quality_estimate.csv"
+        }
+        self.assertEqual(
+            missing_outputs,
+            {
+                "n_pct_estimated",
+                "adf_pct_estimated",
+                "ndf_pct_estimated",
+                "n_accumulated_kg_ha",
+                "critical_n_pct",
+                "nni",
+            },
+        )
+
+    def test_normalized_dataset_cardinalities(self) -> None:
+        frames = validate_data_bundle(DATA_DIR)
+        expected = {
+            "experimental_design.csv": 24,
+            "dry_matter_recorded.csv": 154,
+            "dry_matter_calculated.csv": 154,
+            "harvest_recorded.csv": 48,
+            "harvest_calculated.csv": 48,
+            "quality_recorded.csv": 152,
+            "quality_calculated.csv": 152,
+            "missing_quality_estimate.csv": 1,
+        }
+        for filename, rows in expected.items():
+            self.assertEqual(len(frames[filename]), rows)
+
+    def test_primary_analysis_inputs_match_the_pre_migration_snapshot(self) -> None:
+        longitudinal = self.data.longitudinal
+        harvest = self.data.harvest
+        self.assertEqual(len(longitudinal), 144)
+        self.assertEqual(len(harvest), 48)
+        self.assertAlmostEqual(
+            float(longitudinal["biomass_kg_ha"].sum()),
+            1453062.3947368423,
+        )
+        self.assertAlmostEqual(float(longitudinal["n_pct"].sum()), 218.45560073833525)
+        self.assertAlmostEqual(
+            float(harvest["clean_yield_kg_ha"].sum()),
+            58421.05263157895,
+        )
+        self.assertAlmostEqual(float(harvest["w1000_g"].sum()), 113.297)
+        self.assertAlmostEqual(
+            float(harvest["panicle_density_m2"].sum()),
+            34426.31578947368,
         )
 
     def test_harvest_quantities_are_reconstructed_from_primitives(self) -> None:
@@ -117,17 +263,35 @@ class WorkbookSourceTests(unittest.TestCase):
 
     def test_quality_estimates_are_identified_and_excluded_from_primary_n(self) -> None:
         frame = self.data.longitudinal
-        estimated = frame["quality_status"].eq("estimated_in_workbook")
-        measured = frame["quality_status"].eq("recorded")
+        estimated = frame["quality_status"].eq("estimated")
+        measured = frame["quality_status"].eq("measured")
         self.assertGreater(int(estimated.sum()), 0)
         self.assertTrue(frame.loc[estimated, "n_pct"].isna().all())
         np.testing.assert_allclose(
             frame.loc[measured, "n_pct"],
             frame.loc[measured, "n_pct_recorded"],
         )
-        self.assertTrue(
-            frame.loc[estimated, "n_pct_cell_status"].eq("estimated_in_workbook").all()
+        self.assertTrue(frame.loc[estimated, "n_pct_cell_status"].eq("estimated").all())
+
+    def test_missing_quality_estimate_matches_the_correct_dbca_formula(self) -> None:
+        estimate = pd.read_csv(DATA_DIR / "missing_quality_estimate.csv").iloc[0]
+        self.assertAlmostEqual(float(estimate["n_pct_estimated"]), 2.8688484862162937)
+        self.assertAlmostEqual(float(estimate["adf_pct_estimated"]), 40.77623836505554)
+        self.assertAlmostEqual(float(estimate["ndf_pct_estimated"]), 69.57708690222144)
+        self.assertAlmostEqual(
+            float(estimate["n_accumulated_kg_ha"]), 201.8808679750406
         )
+        self.assertAlmostEqual(float(estimate["nni"]), 1.1159131393270323)
+
+        with (DATA_DIR / "missing_quality_estimate.csv").open(
+            newline="", encoding="utf-8"
+        ) as handle:
+            serialized = next(csv.DictReader(handle))
+        self.assertEqual(serialized["n_pct_estimated"], "2.8688484862162937")
+        self.assertEqual(serialized["adf_pct_estimated"], "40.77623836505554")
+        self.assertEqual(serialized["ndf_pct_estimated"], "69.57708690222144")
+        self.assertEqual(serialized["n_accumulated_kg_ha"], "201.8808679750406")
+        self.assertEqual(serialized["nni"], "1.1159131393270323")
 
     def test_dry_matter_flags_follow_the_declared_dynamic_rule(self) -> None:
         frame = self.data.longitudinal
@@ -147,8 +311,8 @@ class WorkbookSourceTests(unittest.TestCase):
         statuses = " | ".join(self.data.variable_lineage["status"].astype(str))
         for expected in (
             "recorded",
-            "calculated_in_workbook",
-            "estimated_in_workbook",
+            "calculated_materialization",
+            "estimated",
             "analysis_derived",
         ):
             self.assertIn(expected, statuses)
@@ -191,7 +355,7 @@ class StatisticalUtilityTests(unittest.TestCase):
             r_blocks=3,
             t_treatments=4,
         )
-        self.assertAlmostEqual(estimate, 12.333333333333334)
+        self.assertAlmostEqual(estimate, 15.666666666666666)
 
     def test_mixed_model_selection_uses_best_converged_fit(self) -> None:
         fits = {
@@ -314,7 +478,7 @@ class NotebookHygieneTests(unittest.TestCase):
             festuca_metadata = _festuca_metadata(notebook)
             self.assertEqual(
                 festuca_metadata["source_of_truth"],
-                "sources/Datos_Ema_Serrana_INN.xlsx",
+                "data/",
             )
             self.assertEqual(
                 festuca_metadata["markdown_policy"],
@@ -359,7 +523,9 @@ class NotebookHygieneTests(unittest.TestCase):
                     msg=f"{path.name} contains an embedded {label}",
                 )
 
-    def test_notebooks_do_not_read_generated_csv_as_input(self) -> None:
+    def test_notebooks_use_the_package_loader_instead_of_reading_csv_directly(
+        self,
+    ) -> None:
         for path in NOTEBOOKS:
             notebook = _read_notebook(path)
             source = "\n".join(

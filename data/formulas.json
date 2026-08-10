@@ -1,0 +1,373 @@
+{
+  "schema_version": 1,
+  "evaluation_order": [
+    "recorded_data",
+    "dry_matter_calculations",
+    "missing_quality_estimate",
+    "quality_calculations",
+    "harvest_calculations"
+  ],
+  "formulas": [
+    {
+      "id": "dry_matter_pct_from_weights",
+      "output_file": "dry_matter_calculated.csv",
+      "output_column": "dry_matter_pct_from_weights",
+      "inputs": [
+        "dry_weight_g",
+        "green_weight_sample_g"
+      ],
+      "expression": "100 * dry_weight_g / green_weight_sample_g",
+      "excel_formula_template": "=100*[@dry_weight_g]/[@green_weight_sample_g]",
+      "unit": "%"
+    },
+    {
+      "id": "dry_matter_abs_difference_pp",
+      "output_file": "dry_matter_calculated.csv",
+      "output_column": "dry_matter_abs_difference_pp",
+      "inputs": [
+        "dry_matter_pct",
+        "dry_matter_pct_from_weights"
+      ],
+      "expression": "abs(dry_matter_pct - dry_matter_pct_from_weights)",
+      "excel_formula_template": "=ABS([@dry_matter_pct]-[@dry_matter_pct_from_weights])",
+      "unit": "percentage points"
+    },
+    {
+      "id": "dry_matter_relative_difference",
+      "output_file": "dry_matter_calculated.csv",
+      "output_column": "dry_matter_relative_difference",
+      "inputs": [
+        "dry_matter_abs_difference_pp",
+        "dry_matter_pct"
+      ],
+      "expression": "dry_matter_abs_difference_pp / abs(dry_matter_pct)",
+      "excel_formula_template": "=[@dry_matter_abs_difference_pp]/ABS([@dry_matter_pct])",
+      "unit": "ratio"
+    },
+    {
+      "id": "dry_matter_issue",
+      "output_file": "dry_matter_calculated.csv",
+      "output_column": "dry_matter_issue",
+      "inputs": [
+        "dry_matter_abs_difference_pp",
+        "dry_matter_relative_difference"
+      ],
+      "expression": "dry_matter_abs_difference_pp >= 5 and dry_matter_relative_difference >= 0.20",
+      "excel_formula_template": "=AND([@dry_matter_abs_difference_pp]>=5,[@dry_matter_relative_difference]>=0.20)",
+      "unit": null
+    },
+    {
+      "id": "biomass_recorded_dm",
+      "output_file": "dry_matter_calculated.csv",
+      "output_column": "biomass_recorded_dm_kg_ha",
+      "inputs": [
+        "green_weight_1m_g",
+        "dry_matter_pct",
+        "biomass_sample_area_m2"
+      ],
+      "expression": "green_weight_1m_g * (dry_matter_pct / 100) * 10 / biomass_sample_area_m2",
+      "excel_formula_template": "=[@green_weight_1m_g]*([@dry_matter_pct]/100)*10/biomass_sample_area_m2",
+      "unit": "kg DM/ha"
+    },
+    {
+      "id": "biomass_ratio_dm",
+      "output_file": "dry_matter_calculated.csv",
+      "output_column": "biomass_ratio_dm_kg_ha",
+      "inputs": [
+        "green_weight_1m_g",
+        "dry_matter_pct_from_weights",
+        "biomass_sample_area_m2"
+      ],
+      "expression": "green_weight_1m_g * (dry_matter_pct_from_weights / 100) * 10 / biomass_sample_area_m2",
+      "excel_formula_template": "=[@green_weight_1m_g]*([@dry_matter_pct_from_weights]/100)*10/biomass_sample_area_m2",
+      "unit": "kg DM/ha"
+    },
+    {
+      "id": "biomass_recalculation_difference",
+      "output_file": "dry_matter_calculated.csv",
+      "output_column": "biomass_recalculation_difference_kg_ha",
+      "inputs": [
+        "biomass_recorded_dm_kg_ha",
+        "biomass_reported_kg_ha"
+      ],
+      "expression": "biomass_recorded_dm_kg_ha - biomass_reported_kg_ha",
+      "excel_formula_template": "=[@biomass_recorded_dm_kg_ha]-[@biomass_reported_kg_ha]",
+      "unit": "kg DM/ha"
+    },
+    {
+      "id": "tiller_density",
+      "output_file": "dry_matter_calculated.csv",
+      "output_column": "tiller_density_m2",
+      "inputs": [
+        "tillers_30_cm",
+        "row_spacing_cm"
+      ],
+      "expression": "tillers_30_cm * (100 / 30) * (100 / row_spacing_cm)",
+      "excel_formula_template": "=[@tillers_30_cm]*(100/30)*(100/row_spacing_cm)",
+      "unit": "tillers/m2"
+    },
+    {
+      "id": "thousand_seed_weight",
+      "output_file": "harvest_calculated.csv",
+      "output_column": "w1000_g",
+      "inputs": [
+        "w100_rep1_g",
+        "w100_rep2_g",
+        "w100_rep3_g"
+      ],
+      "expression": "mean(w100_rep1_g, w100_rep2_g, w100_rep3_g) * 10",
+      "excel_formula_template": "=AVERAGE([@w100_rep1_g]:[@w100_rep3_g])*10",
+      "unit": "g"
+    },
+    {
+      "id": "panicle_density",
+      "output_file": "harvest_calculated.csv",
+      "output_column": "panicle_density_m2",
+      "inputs": [
+        "panicle_count",
+        "harvest_sample_area_m2"
+      ],
+      "expression": "panicle_count / harvest_sample_area_m2",
+      "excel_formula_template": "=[@panicle_count]/harvest_sample_area_m2",
+      "unit": "panicles/m2"
+    },
+    {
+      "id": "dirty_yield",
+      "output_file": "harvest_calculated.csv",
+      "output_column": "dirty_yield_kg_ha",
+      "inputs": [
+        "dirty_seed_mass_g",
+        "harvest_sample_area_m2"
+      ],
+      "expression": "dirty_seed_mass_g * 10 / harvest_sample_area_m2",
+      "excel_formula_template": "=[@dirty_seed_mass_g]*10/harvest_sample_area_m2",
+      "unit": "kg/ha"
+    },
+    {
+      "id": "clean_yield",
+      "output_file": "harvest_calculated.csv",
+      "output_column": "clean_yield_kg_ha",
+      "inputs": [
+        "clean_seed_mass_g",
+        "harvest_sample_area_m2"
+      ],
+      "expression": "clean_seed_mass_g * 10 / harvest_sample_area_m2",
+      "excel_formula_template": "=[@clean_seed_mass_g]*10/harvest_sample_area_m2",
+      "unit": "kg/ha"
+    },
+    {
+      "id": "clean_recovery",
+      "output_file": "harvest_calculated.csv",
+      "output_column": "clean_recovery",
+      "inputs": [
+        "clean_seed_mass_g",
+        "dirty_seed_mass_g"
+      ],
+      "expression": "clean_seed_mass_g / dirty_seed_mass_g",
+      "excel_formula_template": "=[@clean_seed_mass_g]/[@dirty_seed_mass_g]",
+      "unit": "ratio"
+    },
+    {
+      "id": "cleaning_loss",
+      "output_file": "harvest_calculated.csv",
+      "output_column": "cleaning_loss_pct",
+      "inputs": [
+        "clean_recovery"
+      ],
+      "expression": "100 * (1 - clean_recovery)",
+      "excel_formula_template": "=100*(1-[@clean_recovery])",
+      "unit": "%"
+    },
+    {
+      "id": "estimated_seed_count",
+      "output_file": "harvest_calculated.csv",
+      "output_column": "estimated_seed_count",
+      "inputs": [
+        "clean_seed_mass_g",
+        "w1000_g"
+      ],
+      "expression": "1000 * clean_seed_mass_g / w1000_g",
+      "excel_formula_template": "=1000*[@clean_seed_mass_g]/[@w1000_g]",
+      "unit": "seeds"
+    },
+    {
+      "id": "estimated_seeds_per_panicle",
+      "output_file": "harvest_calculated.csv",
+      "output_column": "estimated_seeds_per_panicle",
+      "inputs": [
+        "estimated_seed_count",
+        "panicle_count"
+      ],
+      "expression": "estimated_seed_count / panicle_count",
+      "excel_formula_template": "=[@estimated_seed_count]/[@panicle_count]",
+      "unit": "seeds/panicle"
+    },
+    {
+      "id": "harvest_index",
+      "output_file": "harvest_calculated.csv",
+      "output_column": "harvest_index_pct",
+      "inputs": [
+        "clean_yield_kg_ha",
+        "final_biomass_kg_ha"
+      ],
+      "expression": "100 * clean_yield_kg_ha / final_biomass_kg_ha",
+      "excel_formula_template": "=100*[@clean_yield_kg_ha]/[@final_biomass_kg_ha]",
+      "unit": "%"
+    },
+    {
+      "id": "rcbd_missing_n",
+      "output_file": "missing_quality_estimate.csv",
+      "output_column": "n_pct_estimated",
+      "inputs": [
+        "n_block_total",
+        "n_treatment_total",
+        "n_grand_total",
+        "treatment_count",
+        "block_count"
+      ],
+      "expression": "(treatment_count * n_block_total + block_count * n_treatment_total - n_grand_total) / ((treatment_count - 1) * (block_count - 1))",
+      "excel_formula_template": "=(treatment_count*[@n_block_total]+block_count*[@n_treatment_total]-[@n_grand_total])/((treatment_count-1)*(block_count-1))",
+      "unit": "%"
+    },
+    {
+      "id": "rcbd_missing_adf",
+      "output_file": "missing_quality_estimate.csv",
+      "output_column": "adf_pct_estimated",
+      "inputs": [
+        "adf_block_total",
+        "adf_treatment_total",
+        "adf_grand_total",
+        "treatment_count",
+        "block_count"
+      ],
+      "expression": "(treatment_count * adf_block_total + block_count * adf_treatment_total - adf_grand_total) / ((treatment_count - 1) * (block_count - 1))",
+      "excel_formula_template": "=(treatment_count*[@adf_block_total]+block_count*[@adf_treatment_total]-[@adf_grand_total])/((treatment_count-1)*(block_count-1))",
+      "unit": "%"
+    },
+    {
+      "id": "rcbd_missing_ndf",
+      "output_file": "missing_quality_estimate.csv",
+      "output_column": "ndf_pct_estimated",
+      "inputs": [
+        "ndf_block_total",
+        "ndf_treatment_total",
+        "ndf_grand_total",
+        "treatment_count",
+        "block_count"
+      ],
+      "expression": "(treatment_count * ndf_block_total + block_count * ndf_treatment_total - ndf_grand_total) / ((treatment_count - 1) * (block_count - 1))",
+      "excel_formula_template": "=(treatment_count*[@ndf_block_total]+block_count*[@ndf_treatment_total]-[@ndf_grand_total])/((treatment_count-1)*(block_count-1))",
+      "unit": "%"
+    },
+    {
+      "id": "quality_n_estimate_lookup",
+      "output_file": "quality_calculated.csv",
+      "output_column": "estimated_n_pct",
+      "inputs": [
+        "sample_id",
+        "measurement_status",
+        "n_pct_estimated"
+      ],
+      "expression": "if measurement_status == 'estimated', look up n_pct_estimated by sample_id; otherwise null",
+      "excel_formula_template": "=IF([@measurement_status]=\"estimated\",XLOOKUP([@sample_id],MissingQuality[sample_id],MissingQuality[n_pct_estimated]),\"\")",
+      "unit": "%"
+    },
+    {
+      "id": "quality_adf_estimate_lookup",
+      "output_file": "quality_calculated.csv",
+      "output_column": "estimated_adf_pct",
+      "inputs": [
+        "sample_id",
+        "measurement_status",
+        "adf_pct_estimated"
+      ],
+      "expression": "if measurement_status == 'estimated', look up adf_pct_estimated by sample_id; otherwise null",
+      "excel_formula_template": "=IF([@measurement_status]=\"estimated\",XLOOKUP([@sample_id],MissingQuality[sample_id],MissingQuality[adf_pct_estimated]),\"\")",
+      "unit": "%"
+    },
+    {
+      "id": "quality_ndf_estimate_lookup",
+      "output_file": "quality_calculated.csv",
+      "output_column": "estimated_ndf_pct",
+      "inputs": [
+        "sample_id",
+        "measurement_status",
+        "ndf_pct_estimated"
+      ],
+      "expression": "if measurement_status == 'estimated', look up ndf_pct_estimated by sample_id; otherwise null",
+      "excel_formula_template": "=IF([@measurement_status]=\"estimated\",XLOOKUP([@sample_id],MissingQuality[sample_id],MissingQuality[ndf_pct_estimated]),\"\")",
+      "unit": "%"
+    },
+    {
+      "id": "n_accumulated",
+      "output_file": "quality_calculated.csv",
+      "output_column": "n_accumulated_kg_ha",
+      "inputs": [
+        "biomass_reported_kg_ha",
+        "effective_n_pct"
+      ],
+      "expression": "biomass_reported_kg_ha * effective_n_pct / 100",
+      "excel_formula_template": "=[@biomass_reported_kg_ha]*[@effective_n_pct]/100",
+      "unit": "kg N/ha"
+    },
+    {
+      "id": "critical_n",
+      "output_file": "quality_calculated.csv",
+      "output_column": "critical_n_pct",
+      "inputs": [
+        "biomass_reported_kg_ha"
+      ],
+      "expression": "4.8 * (biomass_reported_kg_ha / 1000) ** -0.32",
+      "excel_formula_template": "=4.8*([@biomass_reported_kg_ha]/1000)^(-0.32)",
+      "unit": "%"
+    },
+    {
+      "id": "nni",
+      "output_file": "quality_calculated.csv",
+      "output_column": "nni",
+      "inputs": [
+        "effective_n_pct",
+        "critical_n_pct"
+      ],
+      "expression": "effective_n_pct / critical_n_pct",
+      "excel_formula_template": "=[@effective_n_pct]/[@critical_n_pct]",
+      "unit": "ratio"
+    },
+    {
+      "id": "missing_n_accumulated",
+      "output_file": "missing_quality_estimate.csv",
+      "output_column": "n_accumulated_kg_ha",
+      "inputs": [
+        "biomass_kg_ha",
+        "n_pct_estimated"
+      ],
+      "expression": "biomass_kg_ha * n_pct_estimated / 100",
+      "excel_formula_template": "=[@biomass_kg_ha]*[@n_pct_estimated]/100",
+      "unit": "kg N/ha"
+    },
+    {
+      "id": "missing_critical_n",
+      "output_file": "missing_quality_estimate.csv",
+      "output_column": "critical_n_pct",
+      "inputs": [
+        "biomass_kg_ha"
+      ],
+      "expression": "4.8 * (biomass_kg_ha / 1000) ** -0.32",
+      "excel_formula_template": "=4.8*([@biomass_kg_ha]/1000)^(-0.32)",
+      "unit": "%"
+    },
+    {
+      "id": "missing_nni",
+      "output_file": "missing_quality_estimate.csv",
+      "output_column": "nni",
+      "inputs": [
+        "n_pct_estimated",
+        "critical_n_pct"
+      ],
+      "expression": "n_pct_estimated / critical_n_pct",
+      "excel_formula_template": "=[@n_pct_estimated]/[@critical_n_pct]",
+      "unit": "ratio"
+    }
+  ],
+  "note": "Only formulas that materialize canonical calculated columns are retained; the historical workbook remains the archive of cell-level formulas."
+}

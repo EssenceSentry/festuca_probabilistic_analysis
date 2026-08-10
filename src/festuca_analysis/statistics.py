@@ -60,7 +60,7 @@ def rcbd_missing_cell_estimate(
         ].sum()
     )
     grand_total = float(observed[value_column].sum())
-    return (r_blocks * block_total + t_treatments * treatment_total - grand_total) / (
+    return (t_treatments * block_total + r_blocks * treatment_total - grand_total) / (
         (r_blocks - 1) * (t_treatments - 1)
     )
 

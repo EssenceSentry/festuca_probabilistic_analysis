@@ -16,27 +16,65 @@ regenerados durante la ejecución.
 
 ## Fuente de verdad
 
-La única fuente de valores observados es:
+La única fuente editable y analítica es el conjunto normalizado:
 
 ```text
-sources/Datos_Ema_Serrana_INN.xlsx
+data/
 ```
 
-El análisis no usa CSV generados, resultados históricos ni valores copiados de
-la tesis como entrada. Al cargar el libro se registra su SHA-256 y se construyen
-DataFrames separados para:
+`manifest.json` declara esquemas, claves, unidades y rótulos descriptivos en
+español. `formulas.json` conserva únicamente las reglas correspondientes a
+columnas calculadas. Al cargar los datos se valida todo el conjunto, se calcula
+un SHA-256 determinista y se construyen DataFrames separados para:
 
 - mediciones registradas;
-- fórmulas calculadas dentro del XLSX;
-- valores estimados explícitamente en el XLSX;
+- materializaciones calculadas;
+- valores estimados explícitamente identificados;
 - valores derivados nuevamente por el análisis;
 - metadatos de diseño y manejo.
 
-Las magnitudes derivables se reconstruyen desde mediciones primitivas siempre
-que el libro contiene la información necesaria. Las columnas derivadas del
-XLSX se conservan para conciliación, no como autoridad silenciosa. Las
-estimaciones identificadas en la hoja de calidad se mantienen en columnas de
-auditoría y se excluyen del análisis primario de N.
+Las magnitudes derivables se reconstruyen desde mediciones primitivas y se
+comparan con los CSV `*_calculated.csv`. Esas materializaciones sirven para
+conciliación, no como autoridad silenciosa. La estimación identificada en
+calidad se mantiene separada y se excluye del análisis primario de N.
+
+El libro `sources/Datos_Ema_Serrana_INN.xlsx` se conserva sin modificaciones
+como evidencia histórica de la migración. No es una fuente aceptada por el
+cargador analítico. Para validar los datos canónicos:
+
+```bash
+uv run festuca-validate-data
+```
+
+Para generar una representación tabular coherente en Excel desde esas fuentes:
+
+```bash
+uv run festuca-rebuild-workbook
+```
+
+El comando crea `dist/datos_festuca_canonicos.xlsx`. El libro contiene una
+tabla de Excel por hoja, encabezados descriptivos en español y fórmulas vivas
+para las variables calculadas declaradas en `formulas.json`. Es un artefacto
+derivado y reemplazable: **no debe editarse como fuente de datos**. La autoridad
+exclusiva sigue siendo `data/`. Para comprobar que un libro existente coincide
+semánticamente con las fuentes o para reemplazarlo de forma explícita:
+
+```bash
+uv run festuca-rebuild-workbook --check
+uv run festuca-rebuild-workbook --force
+```
+
+También se pueden indicar rutas alternativas mediante `--data-dir` y
+`--output`. El reconstructor valida todo el conjunto antes de escribir, rechaza
+el archivo de bloqueo de Excel y reemplaza la salida de forma atómica.
+
+La migración desde el libro es deliberadamente protegida y no debe ejecutarse
+sobre CSV revisados manualmente. Requiere que Excel esté cerrado y se niega a
+sobrescribir `data/` salvo que se indique explícitamente `--force`:
+
+```bash
+uv run festuca-export-workbook
+```
 
 ## Instalación y ejecución
 
@@ -49,7 +87,7 @@ uv run jupyter lab
 
 Luego abra y ejecute, en orden, uno de los notebooks. El anexo probabilístico es
 computacionalmente más costoso porque vuelve a muestrear todos los modelos desde
-el XLSX actual.
+los datos canónicos actuales.
 
 También existen entradas de terminal:
 
@@ -58,9 +96,8 @@ uv run festuca-longitudinal
 uv run festuca-annex
 ```
 
-No se incluye un `uv.lock` preexistente porque el conjunto de dependencias fue
-corregido. `uv sync` genera uno consistente con el sistema donde se ejecutará el
-análisis.
+`uv.lock` fija el entorno resuelto del proyecto; use `uv sync --frozen` para
+reproducirlo sin modificar dependencias.
 
 ## Pruebas sin ejecutar los análisis
 
@@ -70,14 +107,14 @@ uv run python -m unittest discover -s tests -v
 
 Las pruebas verifican, entre otras cosas:
 
-- procedencia y hash del XLSX;
-- lectura del calendario desde la hoja estructurada;
+- procedencia y hash del conjunto canónico;
+- lectura del calendario desde la cronología atómica;
 - identidades de reconstrucción;
 - separación de mediciones y estimaciones;
 - regla dinámica de auditoría de materia seca;
 - selección de ajustes MixedLM convergidos;
 - valor p correcto para asociaciones ajustadas;
-- notebooks sin salidas ni entradas CSV generadas.
+- notebooks sin salidas y sin lecturas directas que evadan el cargador común.
 
 ## Jerarquía inferencial
 

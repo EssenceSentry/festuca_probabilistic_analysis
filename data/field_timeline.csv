@@ -1,0 +1,19 @@
+event_id,date,event_type,scope,treatment,application_number,growth_stage,description,within_day_order_known
+2025-06-12_trial_installation,2025-06-12,trial_installation,whole_trial,,,,Instalación del ensayo.,false
+2025-06-12_tiller_count,2025-06-12,tiller_count,baseline,,,,Conteo inicial de macollos.,false
+2025-06-12_biomass_quality_sampling,2025-06-12,biomass_quality_sampling,baseline,,,,Muestreo inicial de biomasa y calidad.,false
+2025-06-12_m1_application_1,2025-06-12,nitrogen_application,treatment,M1,1,,Primera aplicación de M1.,false
+2025-06-27_m2_application_1,2025-06-27,nitrogen_application,treatment,M2,1,,Primera aplicación de M2.,
+2025-07-09_m3_application_1,2025-07-09,nitrogen_application,treatment,M3,1,,Primera aplicación de M3.,
+2025-08-04_m1_application_2,2025-08-04,nitrogen_application,treatment,M1,2,,Segunda aplicación de M1.,false
+2025-08-04_m2_application_2,2025-08-04,nitrogen_application,treatment,M2,2,,Segunda aplicación de M2.,false
+2025-08-04_m4_application_1,2025-08-04,nitrogen_application,treatment,M4,1,,Primera aplicación de M4.,false
+2025-08-21_m3_application_2,2025-08-21,nitrogen_application,treatment,M3,2,,Segunda aplicación de M3.,
+2025-08-25_m5_application_1,2025-08-25,nitrogen_application,treatment,M5,1,,Primera aplicación de M5.,
+2025-09-16_m4_application_2,2025-09-16,nitrogen_application,treatment,M4,2,,Segunda aplicación de M4; el orden intradía no está documentado.,false
+2025-09-16_m5_application_2,2025-09-16,nitrogen_application,treatment,M5,2,,Segunda aplicación de M5; el orden intradía no está documentado.,false
+2025-09-16_biomass_quality_sampling,2025-09-16,biomass_quality_sampling,all_treatments,,,Z31; registro adicional Z3.08,Primer corte de materia seca y muestreo de calidad; el orden intradía no está documentado.,false
+2025-09-16_phenology_observation,2025-09-16,phenology_observation,all_treatments,,,Z31; registro adicional Z3.08,Nudos registrados: 0-1-0-1-1-1-1-2-1-0.,false
+2025-10-20_biomass_quality_sampling,2025-10-20,biomass_quality_sampling,all_treatments,,,anthesis,Corte para materia seca y calidad en antesis.,
+2025-11-12_biomass_quality_sampling,2025-11-12,biomass_quality_sampling,all_treatments,,,,Corte final para materia seca y calidad.,false
+2025-11-12_harvest,2025-11-12,harvest,all_treatments,,,,Cosecha para evaluar el rendimiento y sus componentes.,false

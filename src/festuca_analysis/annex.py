@@ -1,7 +1,7 @@
 """Source-reproducible probabilistic annex for the Festuca experiment.
 
 No posterior summaries are imported from historical runs.  Every model reads the
-current XLSX workbook through :mod:`festuca_analysis.source_data`.  The model uses
+canonical CSV bundle through :mod:`festuca_analysis.source_data`.  The model uses
 observed response centering and scaling for numerical stability; consequently,
 its predictive audit is explicitly labelled conditional/data-scaled rather than
 as a pre-data prior predictive analysis.
@@ -205,7 +205,7 @@ class ProbabilisticAnnex:
         self,
         *,
         project_root: Path | None = None,
-        workbook_path: Path | str | None = None,
+        data_dir: Path | str | None = None,
         draws: int = 2000,
         tune: int = 2000,
         chains: int = 4,
@@ -218,7 +218,7 @@ class ProbabilisticAnnex:
         print_figure_json: bool = False,
     ) -> None:
         self.project_root = (project_root or PROJECT_ROOT).resolve()
-        self.workbook_path = workbook_path
+        self.data_dir = data_dir
         self.draws = draws
         self.tune = tune
         self.chains = chains
@@ -302,7 +302,7 @@ class ProbabilisticAnnex:
 
     def load_data(self) -> pd.DataFrame:
         self.data = load_experiment_data(
-            self.workbook_path,
+            self.data_dir,
             project_root=self.project_root,
             dry_matter_policy="recorded",
             include_estimated_quality=False,
@@ -1010,7 +1010,7 @@ class ProbabilisticAnnex:
             title="Qué produciría nuevamente el análisis convencional",
             subtitle=(
                 "Distribución posterior predictiva del p del ANOVA M1–M5; el umbral "
-                "0,05 y el p observado se recalculan desde el XLSX."
+                "0,05 y el p observado se recalculan desde los datos canónicos."
             ),
         )
         return summary
@@ -1677,7 +1677,7 @@ class ProbabilisticAnnex:
                 "Círculos llenos y barras: mediana e intervalo nulo del 95 %. "
                 "Círculos vacíos: correlación observada."
             ),
-            note="El nulo de cuatro filas se vuelve a generar desde las mediciones actuales del XLSX.",
+            note="El nulo de cuatro filas se vuelve a generar desde las mediciones canónicas actuales.",
         )
         return table
 
